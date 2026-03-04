@@ -1,6 +1,6 @@
 import json
 from openai import OpenAI
-from config import OPENAI_API_KEY, SYNTHESIS_MODEL
+from config import OPENAI_API_KEY, SYNTHESIS_MODEL, PROMPTS_DIR
 from models.schemas import ExtractionOutput
 
 
@@ -17,7 +17,7 @@ def run_synthesis(extraction: ExtractionOutput, voice_profile: str, founder_name
     3. Send to GPT-5.2
     4. Return the raw draft text (string, not JSON)
     """
-    with open("prompts/synthesis.txt", "r") as f:
+    with open(PROMPTS_DIR / "synthesis.txt", "r") as f:
         system_prompt = f.read()
 
     user_message = f"""FOUNDER NAME: {founder_name}

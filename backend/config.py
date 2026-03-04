@@ -1,4 +1,5 @@
 import os
+from pathlib import Path
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -11,3 +12,7 @@ EXTRACTION_MODEL = "gemini-3-pro"         # Google — deep reasoning
 SYNTHESIS_MODEL = "gpt-5.2"               # OpenAI — creative writing
 CRITIQUE_MODEL = "gemini-3-flash"         # Google — fast evaluation
 CASCADE_MODEL = "gpt-4o-mini"             # OpenAI — fast formatting
+
+# Base paths
+BACKEND_DIR = Path(__file__).parent
+PROMPTS_DIR = BACKEND_DIR / "prompts"

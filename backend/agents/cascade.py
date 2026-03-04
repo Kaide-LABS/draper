@@ -1,6 +1,6 @@
 import json
 from openai import OpenAI
-from config import OPENAI_API_KEY, CASCADE_MODEL
+from config import OPENAI_API_KEY, CASCADE_MODEL, PROMPTS_DIR
 from models.schemas import CascadeOutput
 
 
@@ -18,7 +18,7 @@ def run_cascade(long_form_draft: str) -> CascadeOutput:
     3. Parse JSON response into CascadeOutput
     4. Return all 4 assets
     """
-    with open("prompts/cascade.txt", "r") as f:
+    with open(PROMPTS_DIR / "cascade.txt", "r") as f:
         system_prompt = f.read()
 
     response = client.chat.completions.create(

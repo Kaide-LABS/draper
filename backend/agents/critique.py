@@ -1,7 +1,7 @@
 import json
 import re
 from google import genai
-from config import GOOGLE_API_KEY, CRITIQUE_MODEL
+from config import GOOGLE_API_KEY, CRITIQUE_MODEL, PROMPTS_DIR
 from models.schemas import CritiqueScore
 
 
@@ -53,7 +53,7 @@ def run_critique(draft: str, voice_profile: str) -> CritiqueScore:
     """
     ai_risk = calculate_ai_detection_risk(draft)
 
-    with open("prompts/critique.txt", "r") as f:
+    with open(PROMPTS_DIR / "critique.txt", "r") as f:
         system_prompt = f.read()
 
     response = client.models.generate_content(

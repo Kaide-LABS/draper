@@ -1,6 +1,6 @@
 import json
 from google import genai
-from config import GOOGLE_API_KEY, EXTRACTION_MODEL
+from config import GOOGLE_API_KEY, EXTRACTION_MODEL, PROMPTS_DIR
 from models.schemas import ExtractionOutput
 
 
@@ -18,7 +18,7 @@ def run_extraction(transcript: str) -> ExtractionOutput:
     3. Parse JSON response into ExtractionOutput
     4. Return structured extraction
     """
-    with open("prompts/extraction.txt", "r") as f:
+    with open(PROMPTS_DIR / "extraction.txt", "r") as f:
         system_prompt = f.read()
 
     response = client.models.generate_content(
