@@ -45,7 +45,7 @@ export default function ReviewPage() {
     <div className="space-y-6">
       {/* Page Header */}
       <div className="text-center space-y-2">
-        <h1 className="text-2xl font-bold">Review Dashboard</h1>
+        <h1 className="text-3xl font-serif font-bold">Review Dashboard</h1>
         <p className="text-draper-muted text-sm">
           Review, edit, and approve your authority content
         </p>
@@ -103,7 +103,7 @@ export default function ReviewPage() {
             sessionStorage.clear();
             router.push("/");
           }}
-          className="px-6 py-2 text-sm bg-draper-dark text-draper-muted rounded-lg hover:text-white border border-draper-border"
+          className="px-6 py-2 text-sm bg-draper-dark text-draper-muted rounded-lg hover:text-draper-text border border-draper-border"
         >
           ← Start New Generation
         </button>

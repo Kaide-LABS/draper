@@ -23,7 +23,7 @@ export function DraftPanel({ draft, scorecard, revisionLoops, founderName }: Dra
         </div>
         <div className="prose prose-invert prose-sm max-w-none">
           {draft.split("\n").map((paragraph, i) => (
-            <p key={i} className="text-sm text-gray-300 leading-relaxed mb-3">
+            <p key={i} className="text-sm text-draper-text/80 leading-relaxed mb-3">
               {paragraph}
             </p>
           ))}

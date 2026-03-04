@@ -49,11 +49,11 @@ export function NewsletterPreview({ content, founderName, onContentChange }: New
         <div className="space-y-1">
           <div className="flex items-center gap-2 text-xs">
             <span className="text-draper-muted w-12">From:</span>
-            <span className="text-gray-300">{founderName}</span>
+            <span className="text-draper-text/80">{founderName}</span>
           </div>
           <div className="flex items-center gap-2 text-xs">
             <span className="text-draper-muted w-12">Subject:</span>
-            <span className="text-white font-semibold">{subjectLine}</span>
+            <span className="text-draper-text font-semibold">{subjectLine}</span>
           </div>
         </div>
       </div>
@@ -64,11 +64,11 @@ export function NewsletterPreview({ content, founderName, onContentChange }: New
           <textarea
             value={editValue}
             onChange={(e) => setEditValue(e.target.value)}
-            className="w-full bg-draper-dark border border-draper-border rounded p-3 text-sm text-gray-300 resize-y min-h-[120px] focus:outline-none focus:border-draper-gold"
+            className="w-full bg-draper-dark border border-draper-border rounded p-3 text-sm text-draper-text/80 resize-y min-h-[120px] focus:outline-none focus:border-draper-gold"
             rows={6}
           />
         ) : (
-          <div className="text-sm text-gray-300 leading-relaxed whitespace-pre-line">
+          <div className="text-sm text-draper-text/80 leading-relaxed whitespace-pre-line">
             {editValue}
           </div>
         )}
@@ -95,7 +95,7 @@ export function NewsletterPreview({ content, founderName, onContentChange }: New
             </button>
             <button
               onClick={handleCancel}
-              className="px-3 py-1 text-xs bg-draper-dark text-draper-muted rounded hover:text-white"
+              className="px-3 py-1 text-xs bg-draper-dark text-draper-muted rounded hover:text-draper-text"
             >
               Cancel
             </button>
@@ -107,20 +107,20 @@ export function NewsletterPreview({ content, founderName, onContentChange }: New
               className={`px-3 py-1 text-xs rounded font-semibold ${
                 isApproved
                   ? "bg-green-500/20 text-green-400"
-                  : "bg-draper-dark text-draper-muted hover:text-white"
+                  : "bg-draper-dark text-draper-muted hover:text-draper-text"
               }`}
             >
               {isApproved ? "✓ Approved" : "Approve"}
             </button>
             <button
               onClick={() => setIsEditing(true)}
-              className="px-3 py-1 text-xs bg-draper-dark text-draper-muted rounded hover:text-white"
+              className="px-3 py-1 text-xs bg-draper-dark text-draper-muted rounded hover:text-draper-text"
             >
               Edit
             </button>
             <button
               onClick={handleCopy}
-              className="px-3 py-1 text-xs bg-draper-dark text-draper-muted rounded hover:text-white"
+              className="px-3 py-1 text-xs bg-draper-dark text-draper-muted rounded hover:text-draper-text"
             >
               {copied ? "Copied!" : "Copy"}
             </button>

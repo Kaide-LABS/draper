@@ -77,7 +77,7 @@ export function TwitterPreview({ thread, founderName, onThreadChange }: TwitterP
                   <textarea
                     value={tweet}
                     onChange={(e) => handleTweetChange(i, e.target.value)}
-                    className="w-full bg-draper-dark border border-draper-border rounded p-2 text-sm text-gray-300 resize-y min-h-[60px] focus:outline-none focus:border-draper-gold"
+                    className="w-full bg-draper-dark border border-draper-border rounded p-2 text-sm text-draper-text/80 resize-y min-h-[60px] focus:outline-none focus:border-draper-gold"
                     rows={3}
                   />
                   <p className={`text-xs mt-1 ${tweet.length > 280 ? "text-red-400" : "text-draper-muted"}`}>
@@ -85,7 +85,7 @@ export function TwitterPreview({ thread, founderName, onThreadChange }: TwitterP
                   </p>
                 </div>
               ) : (
-                <p className="text-sm text-gray-300 leading-relaxed">{tweet}</p>
+                <p className="text-sm text-draper-text/80 leading-relaxed">{tweet}</p>
               )}
 
               {/* Engagement icons (non-editing only) */}
@@ -114,7 +114,7 @@ export function TwitterPreview({ thread, founderName, onThreadChange }: TwitterP
             </button>
             <button
               onClick={handleCancel}
-              className="px-3 py-1 text-xs bg-draper-dark text-draper-muted rounded hover:text-white"
+              className="px-3 py-1 text-xs bg-draper-dark text-draper-muted rounded hover:text-draper-text"
             >
               Cancel
             </button>
@@ -126,20 +126,20 @@ export function TwitterPreview({ thread, founderName, onThreadChange }: TwitterP
               className={`px-3 py-1 text-xs rounded font-semibold ${
                 isApproved
                   ? "bg-green-500/20 text-green-400"
-                  : "bg-draper-dark text-draper-muted hover:text-white"
+                  : "bg-draper-dark text-draper-muted hover:text-draper-text"
               }`}
             >
               {isApproved ? "✓ Approved" : "Approve"}
             </button>
             <button
               onClick={() => setIsEditing(true)}
-              className="px-3 py-1 text-xs bg-draper-dark text-draper-muted rounded hover:text-white"
+              className="px-3 py-1 text-xs bg-draper-dark text-draper-muted rounded hover:text-draper-text"
             >
               Edit
             </button>
             <button
               onClick={handleCopy}
-              className="px-3 py-1 text-xs bg-draper-dark text-draper-muted rounded hover:text-white"
+              className="px-3 py-1 text-xs bg-draper-dark text-draper-muted rounded hover:text-draper-text"
             >
               {copied ? "Copied!" : "Copy"}
             </button>

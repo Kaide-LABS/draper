@@ -46,7 +46,7 @@ export function StatsBar({
 function StatItem({
   label,
   value,
-  valueColor = "text-white",
+  valueColor = "text-draper-text",
 }: {
   label: string;
   value: string;

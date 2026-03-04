@@ -131,7 +131,7 @@ export function UploadPanel({ onSubmit, isLoading }: UploadPanelProps) {
           placeholder="e.g., Alex Chen"
           value={founderName}
           onChange={(e) => setFounderName(e.target.value)}
-          className="bg-draper-dark border-draper-border text-white placeholder:text-draper-muted/50"
+          className="bg-draper-dark border-draper-border text-draper-text placeholder:text-draper-muted/50"
         />
       </div>
 
@@ -144,7 +144,7 @@ export function UploadPanel({ onSubmit, isLoading }: UploadPanelProps) {
             className={`px-4 py-2 text-sm rounded-lg border transition-colors ${
               inputMode === "text"
                 ? "bg-draper-gold/20 border-draper-gold text-draper-gold"
-                : "bg-draper-dark border-draper-border text-draper-muted hover:text-white"
+                : "bg-draper-dark border-draper-border text-draper-muted hover:text-draper-text"
             }`}
           >
             Text
@@ -154,7 +154,7 @@ export function UploadPanel({ onSubmit, isLoading }: UploadPanelProps) {
             className={`px-4 py-2 text-sm rounded-lg border transition-colors ${
               inputMode === "audio"
                 ? "bg-draper-gold/20 border-draper-gold text-draper-gold"
-                : "bg-draper-dark border-draper-border text-draper-muted hover:text-white"
+                : "bg-draper-dark border-draper-border text-draper-muted hover:text-draper-text"
             }`}
           >
             Audio
@@ -174,7 +174,7 @@ export function UploadPanel({ onSubmit, isLoading }: UploadPanelProps) {
             value={content}
             onChange={(e) => setContent(e.target.value)}
             rows={10}
-            className="bg-draper-dark border-draper-border text-white placeholder:text-draper-muted/50 resize-y min-h-[200px]"
+            className="bg-draper-dark border-draper-border text-draper-text placeholder:text-draper-muted/50 resize-y min-h-[200px]"
           />
           <p className="text-xs text-draper-muted">
             {content.split(/\s+/).filter(Boolean).length} words
@@ -252,7 +252,7 @@ export function UploadPanel({ onSubmit, isLoading }: UploadPanelProps) {
           placeholder="e.g., direct, technical, contrarian"
           value={voiceProfile}
           onChange={(e) => setVoiceProfile(e.target.value)}
-          className="bg-draper-dark border-draper-border text-white placeholder:text-draper-muted/50"
+          className="bg-draper-dark border-draper-border text-draper-text placeholder:text-draper-muted/50"
         />
         <p className="text-xs text-draper-muted">
           Describe the founder&apos;s tone in 3-5 words
@@ -268,9 +268,9 @@ export function UploadPanel({ onSubmit, isLoading }: UploadPanelProps) {
             (inputMode === "audio" && !audioFile) ||
             isLoading
           }
-          className="w-full bg-draper-gold text-draper-black font-semibold hover:bg-draper-gold-hover disabled:opacity-40 disabled:cursor-not-allowed h-12 text-base"
+          className="w-full bg-draper-gold text-draper-black font-semibold hover:bg-draper-gold-hover disabled:opacity-40 disabled:cursor-not-allowed h-12 text-sm uppercase tracking-widest"
         >
-          {isLoading ? "Generating..." : "Generate Authority Content"}
+          {isLoading ? "Generating..." : "GET STARTED >>"}
         </Button>
 
         <button

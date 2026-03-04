@@ -54,12 +54,13 @@ export default function HomePage() {
 
   return (
     <div className="space-y-8">
-      {/* Hero */}
-      <div className="text-center space-y-3">
-        <h1 className="text-3xl font-bold tracking-tight">
-          Authority Engine
+      {/* Hero — Draper editorial style */}
+      <div className="text-center space-y-4">
+        <h1 className="text-4xl md:text-5xl font-serif font-bold tracking-tight leading-tight">
+          The AI content strategist<br />
+          <em className="text-draper-gold">with human taste.</em>
         </h1>
-        <p className="text-draper-muted max-w-xl mx-auto">
+        <p className="text-draper-muted max-w-xl mx-auto text-base">
           Paste a founder&apos;s raw thinking. Get publication-ready content for
           LinkedIn, X, newsletter, and more — in seconds, not hours.
         </p>

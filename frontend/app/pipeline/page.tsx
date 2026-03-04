@@ -61,7 +61,7 @@ export default function PipelinePage() {
     <div className="space-y-8">
       {/* Header */}
       <div className="text-center space-y-2">
-        <h1 className="text-2xl font-bold">
+        <h1 className="text-3xl font-serif font-bold">
           {status?.status === "complete"
             ? "Pipeline Complete"
             : status?.status === "failed"
@@ -91,7 +91,7 @@ export default function PipelinePage() {
               sessionStorage.clear();
               router.push("/");
             }}
-            className="px-4 py-2 text-xs bg-draper-dark text-draper-muted rounded hover:text-white border border-draper-border"
+            className="px-4 py-2 text-xs bg-draper-dark text-draper-muted rounded hover:text-draper-text border border-draper-border"
           >
             ← Back to Start
           </button>

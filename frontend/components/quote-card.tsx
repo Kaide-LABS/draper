@@ -47,7 +47,7 @@ export function QuoteCard({ quote, founderName, onQuoteChange }: QuoteCardProps)
           <textarea
             value={editValue}
             onChange={(e) => setEditValue(e.target.value)}
-            className="w-full bg-draper-dark border border-draper-border rounded p-3 text-sm text-gray-300 resize-y min-h-[100px] focus:outline-none focus:border-draper-gold"
+            className="w-full bg-draper-dark border border-draper-border rounded p-3 text-sm text-draper-text/80 resize-y min-h-[100px] focus:outline-none focus:border-draper-gold"
             rows={4}
           />
         ) : (
@@ -59,7 +59,7 @@ export function QuoteCard({ quote, founderName, onQuoteChange }: QuoteCardProps)
             <span className="text-4xl text-draper-gold/40 font-serif leading-none block mb-2">"</span>
 
             {/* Quote text — serif font */}
-            <p className="text-lg font-serif text-white leading-relaxed pl-4">
+            <p className="text-lg font-serif text-draper-text leading-relaxed pl-4">
               {editValue}
             </p>
 
@@ -84,7 +84,7 @@ export function QuoteCard({ quote, founderName, onQuoteChange }: QuoteCardProps)
             </button>
             <button
               onClick={handleCancel}
-              className="px-3 py-1 text-xs bg-draper-dark text-draper-muted rounded hover:text-white"
+              className="px-3 py-1 text-xs bg-draper-dark text-draper-muted rounded hover:text-draper-text"
             >
               Cancel
             </button>
@@ -96,20 +96,20 @@ export function QuoteCard({ quote, founderName, onQuoteChange }: QuoteCardProps)
               className={`px-3 py-1 text-xs rounded font-semibold ${
                 isApproved
                   ? "bg-green-500/20 text-green-400"
-                  : "bg-draper-dark text-draper-muted hover:text-white"
+                  : "bg-draper-dark text-draper-muted hover:text-draper-text"
               }`}
             >
               {isApproved ? "✓ Approved" : "Approve"}
             </button>
             <button
               onClick={() => setIsEditing(true)}
-              className="px-3 py-1 text-xs bg-draper-dark text-draper-muted rounded hover:text-white"
+              className="px-3 py-1 text-xs bg-draper-dark text-draper-muted rounded hover:text-draper-text"
             >
               Edit
             </button>
             <button
               onClick={handleCopy}
-              className="px-3 py-1 text-xs bg-draper-dark text-draper-muted rounded hover:text-white"
+              className="px-3 py-1 text-xs bg-draper-dark text-draper-muted rounded hover:text-draper-text"
             >
               {copied ? "Copied!" : "Copy"}
             </button>

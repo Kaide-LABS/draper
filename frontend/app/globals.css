@@ -2,22 +2,25 @@
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
 
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Playfair+Display:wght@700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=DM+Sans:ital,wght@0,400;0,500;0,600;0,700;1,400;1,500&family=Playfair+Display:ital,wght@0,400;0,500;0,600;0,700;1,400;1,500;1,600;1,700&family=Libre+Baskerville:ital,wght@0,400;0,700;1,400&display=swap');
 
 @custom-variant dark (&:is(.dark *));
 
 @theme inline {
-  /* Draper brand palette */
-  --color-draper-black: #0A0A0A;
-  --color-draper-charcoal: #1A1A1A;
-  --color-draper-dark: #111111;
-  --color-draper-border: #2A2A2A;
-  --color-draper-muted: #888888;
-  --color-draper-gold: #C9A84C;
-  --color-draper-gold-hover: #D4B85C;
+  /* Draper HQ brand palette — matched from draperhq.com */
+  --color-draper-black: #0c0b0a;
+  --color-draper-charcoal: hsl(30, 5%, 10%);
+  --color-draper-dark: hsl(30, 5%, 8%);
+  --color-draper-border: hsl(30, 5%, 15%);
+  --color-draper-muted: hsl(30, 5%, 50%);
+  --color-draper-gold: #E5C55D;
+  --color-draper-gold-hover: #EDD174;
+  --color-draper-text: #f0ede6;
+  --color-draper-surface: hsl(30, 5%, 12%);
 
-  --font-sans: "Inter", "system-ui", sans-serif;
+  --font-sans: "DM Sans", "system-ui", sans-serif;
   --font-serif: "Playfair Display", "Georgia", serif;
+  --font-editorial: "Libre Baskerville", "Georgia", serif;
 
   /* shadcn default theme mappings */
   --color-background: var(--background);
@@ -134,6 +137,6 @@
     @apply border-border;
   }
   body {
-    @apply bg-draper-black text-white font-sans antialiased;
+    @apply bg-draper-black text-draper-text font-sans antialiased;
   }
 }
