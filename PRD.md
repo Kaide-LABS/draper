@@ -2724,8 +2724,9 @@ cd frontend && npm run dev
 
 ---
 
-### Phase 4: Review Dashboard
-**Goal:** All outputs displayed in polished, platform-accurate preview frames with approve/edit/regenerate actions.
+### Phase 4: Review Dashboard — Full Implementation Spec
+
+**Goal:** All outputs displayed in polished, platform-accurate preview frames with approve/edit actions.
 
 **What gets built:**
 - **Review page (`/review`) — two-panel layout:**
@@ -2736,25 +2737,950 @@ cd frontend && npm run dev
   - **X/Twitter preview:** Sequential tweet cards with thread connector line, character counts, like/reply/repost icons
   - **Newsletter preview:** Email-style frame with subject line, preview text, "Read more" CTA
   - **Quote card preview:** Dark branded card with serif font, gold accent line, the core quote rendered as a visual asset
-- **Actions per asset:** Approve (green), Edit (opens inline text editor), Regenerate (re-calls cascade agent for that asset)
+- **Actions per asset:** Approve (green check toggle), Edit (opens inline textarea), Copy (copy to clipboard)
 - **Top stats bar:** Total generation time, estimated API cost, overall quality score, revision count
-- **Edit mode:** Click "Edit" on any asset → text becomes editable inline → "Save" to update
+- **Edit mode:** Click "Edit" on any asset → text becomes editable textarea → "Save" or "Cancel"
 
 **What's NOT in Phase 4:**
 - No actual social media publishing
 - No export/download functionality
-- Regenerate calls the full cascade agent (not individual asset regeneration)
+- No regenerate (removed — edit is sufficient for demo, regenerate adds API call complexity)
 
 **Key files:**
 | File | Purpose |
 |------|---------|
-| `frontend/app/review/page.tsx` | Review dashboard page |
+| `frontend/app/review/page.tsx` | Review dashboard page (replaces Phase 3 placeholder) |
 | `frontend/components/linkedin-preview.tsx` | LinkedIn post mock frame |
 | `frontend/components/twitter-preview.tsx` | X/Twitter thread mock frame |
 | `frontend/components/newsletter-preview.tsx` | Email/newsletter mock frame |
 | `frontend/components/quote-card.tsx` | Branded visual quote card |
+| `frontend/components/draft-panel.tsx` | Long-form draft display + scorecard |
+| `frontend/components/stats-bar.tsx` | Top stats bar (time, cost, score, revisions) |
 
-**Verification:** Pipeline completes → review page shows long-form draft with scorecard on left, all 4 platform previews on right. Edit button works. Approve button visually marks asset as approved.
+**Verification:** Pipeline completes → review page shows long-form draft with scorecard on left, all 4 platform previews on right. Edit button works on each asset. Approve button visually marks asset as approved. Stats bar shows generation metadata.
+
+---
+
+#### Phase 4: Data Flow
+
+The review page loads `PipelineResult` from `sessionStorage` (stored by pipeline page on completion). The data shape (already defined in `frontend/lib/api.ts`):
+
+```typescript
+// Already exists — no changes needed to api.ts
+interface PipelineResult {
+  pipeline_id: string;
+  long_form_draft: string;           // Full text for left panel
+  critique_scorecard: CritiqueScore;  // Scorecard data for left panel
+  assets: CascadeOutput;             // 4 platform assets for right panel
+  metadata: {
+    total_duration_ms: number;
+    estimated_cost_usd: number;
+    revision_loops: number;
+    input_word_count: number;
+    output_word_count: number;
+  };
+}
+
+interface CascadeOutput {
+  linkedin_post: string;
+  x_thread: string[];        // Array of 4-6 tweets
+  newsletter_blurb: string;
+  quote_card_text: string;
+}
+```
+
+No backend changes needed for Phase 4. All data is already available from the Phase 1 pipeline.
+
+---
+
+#### Phase 4: Complete File Specifications
+
+---
+
+##### File: `frontend/components/stats-bar.tsx`
+
+**Purpose:** Horizontal bar at the top of the review page showing key pipeline metrics.
+
+```tsx
+"use client";
+
+interface StatsBarProps {
+  totalDurationMs: number;
+  estimatedCostUsd: number;
+  overallScore: number;
+  passed: boolean;
+  revisionLoops: number;
+  inputWordCount: number;
+  outputWordCount: number;
+}
+
+export function StatsBar({
+  totalDurationMs,
+  estimatedCostUsd,
+  overallScore,
+  passed,
+  revisionLoops,
+  inputWordCount,
+  outputWordCount,
+}: StatsBarProps) {
+  const durationSec = (totalDurationMs / 1000).toFixed(1);
+
+  return (
+    <div className="bg-draper-charcoal border border-draper-border rounded-lg p-4">
+      <div className="flex items-center justify-between flex-wrap gap-4">
+        <StatItem label="Generation Time" value={`${durationSec}s`} />
+        <StatItem label="Est. API Cost" value={`$${estimatedCostUsd.toFixed(3)}`} />
+        <StatItem
+          label="Quality Score"
+          value={`${overallScore}/100`}
+          valueColor={passed ? "text-green-400" : "text-red-400"}
+        />
+        <StatItem
+          label="Revisions"
+          value={`${revisionLoops}/2`}
+          valueColor={revisionLoops > 0 ? "text-amber-400" : "text-draper-muted"}
+        />
+        <StatItem label="Input Words" value={inputWordCount.toLocaleString()} />
+        <StatItem label="Output Words" value={outputWordCount.toLocaleString()} />
+      </div>
+    </div>
+  );
+}
+
+function StatItem({
+  label,
+  value,
+  valueColor = "text-white",
+}: {
+  label: string;
+  value: string;
+  valueColor?: string;
+}) {
+  return (
+    <div className="text-center">
+      <p className="text-xs text-draper-muted">{label}</p>
+      <p className={`text-sm font-mono font-semibold ${valueColor}`}>{value}</p>
+    </div>
+  );
+}
+```
+
+---
+
+##### File: `frontend/components/draft-panel.tsx`
+
+**Purpose:** Left panel showing the full long-form authority draft and the critique scorecard below it. Uses the existing `Scorecard` component from Phase 3.
+
+```tsx
+"use client";
+
+import { Scorecard } from "@/components/scorecard";
+import type { CritiqueScore } from "@/lib/api";
+
+interface DraftPanelProps {
+  draft: string;
+  scorecard: CritiqueScore;
+  revisionLoops: number;
+  founderName?: string;
+}
+
+export function DraftPanel({ draft, scorecard, revisionLoops, founderName }: DraftPanelProps) {
+  return (
+    <div className="space-y-4">
+      {/* Draft Section */}
+      <div className="bg-draper-charcoal border border-draper-border rounded-lg p-6">
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-sm font-semibold text-draper-gold">Long-Form Authority Draft</h3>
+          {founderName && (
+            <span className="text-xs text-draper-muted">by {founderName}</span>
+          )}
+        </div>
+        <div className="prose prose-invert prose-sm max-w-none">
+          {draft.split("\n").map((paragraph, i) => (
+            <p key={i} className="text-sm text-gray-300 leading-relaxed mb-3">
+              {paragraph}
+            </p>
+          ))}
+        </div>
+      </div>
+
+      {/* Scorecard Section — reuse Phase 3 component */}
+      <Scorecard
+        scores={{
+          ai_detection_risk: scorecard.ai_detection_risk,
+          readability: scorecard.readability,
+          contrarian_strength: scorecard.contrarian_strength,
+          voice_authenticity: scorecard.voice_authenticity,
+          hook_power: scorecard.hook_power,
+          actionable_density: scorecard.actionable_density,
+          overall: scorecard.overall,
+        }}
+        passed={scorecard.passed}
+        revisionCount={revisionLoops}
+      />
+
+      {/* Revision Notes (if any) */}
+      {scorecard.revision_notes && (
+        <div className="bg-amber-900/10 border border-amber-800/30 rounded-lg p-4">
+          <p className="text-xs font-semibold text-amber-400 mb-1">Revision Notes</p>
+          <p className="text-xs text-amber-300/80">{scorecard.revision_notes}</p>
+        </div>
+      )}
+    </div>
+  );
+}
+```
+
+---
+
+##### File: `frontend/components/linkedin-preview.tsx`
+
+**Purpose:** LinkedIn-style post mock frame. Shows a realistic LinkedIn post card with profile info, post body, and engagement bar.
+
+```tsx
+"use client";
+
+import { useState } from "react";
+
+interface LinkedInPreviewProps {
+  content: string;
+  founderName: string;
+  onContentChange?: (newContent: string) => void;
+}
+
+export function LinkedInPreview({ content, founderName, onContentChange }: LinkedInPreviewProps) {
+  const [isEditing, setIsEditing] = useState(false);
+  const [editValue, setEditValue] = useState(content);
+  const [isApproved, setIsApproved] = useState(false);
+  const [copied, setCopied] = useState(false);
+
+  const handleSave = () => {
+    onContentChange?.(editValue);
+    setIsEditing(false);
+  };
+
+  const handleCancel = () => {
+    setEditValue(content);
+    setIsEditing(false);
+  };
+
+  const handleCopy = async () => {
+    await navigator.clipboard.writeText(editValue);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  return (
+    <div className={`bg-draper-charcoal border rounded-lg overflow-hidden ${isApproved ? "border-green-500/50" : "border-draper-border"}`}>
+      {/* Header — LinkedIn branding */}
+      <div className="px-4 pt-3 pb-2 flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <span className="text-xs font-semibold text-[#0A66C2]">in</span>
+          <span className="text-xs text-draper-muted">LinkedIn Post</span>
+        </div>
+        {isApproved && <span className="text-xs text-green-400">Approved</span>}
+      </div>
+
+      {/* Profile section */}
+      <div className="px-4 pb-3 flex items-center gap-3">
+        <div className="w-10 h-10 rounded-full bg-draper-dark flex items-center justify-center text-sm font-bold text-draper-gold">
+          {founderName.charAt(0)}
+        </div>
+        <div>
+          <p className="text-sm font-semibold">{founderName}</p>
+          <p className="text-xs text-draper-muted">Founder & CEO</p>
+          <p className="text-xs text-draper-muted">Just now · 🌐</p>
+        </div>
+      </div>
+
+      {/* Post body */}
+      <div className="px-4 pb-3">
+        {isEditing ? (
+          <textarea
+            value={editValue}
+            onChange={(e) => setEditValue(e.target.value)}
+            className="w-full bg-draper-dark border border-draper-border rounded p-3 text-sm text-gray-300 resize-y min-h-[150px] focus:outline-none focus:border-draper-gold"
+            rows={8}
+          />
+        ) : (
+          <div className="text-sm text-gray-300 leading-relaxed whitespace-pre-line">
+            {editValue}
+          </div>
+        )}
+      </div>
+
+      {/* Engagement bar */}
+      <div className="px-4 py-2 border-t border-draper-border flex items-center justify-between text-xs text-draper-muted">
+        <div className="flex items-center gap-4">
+          <span>👍 Like</span>
+          <span>💬 Comment</span>
+          <span>🔄 Repost</span>
+          <span>📤 Send</span>
+        </div>
+      </div>
+
+      {/* Action buttons */}
+      <div className="px-4 py-3 border-t border-draper-border flex items-center gap-2">
+        {isEditing ? (
+          <>
+            <button
+              onClick={handleSave}
+              className="px-3 py-1 text-xs bg-draper-gold text-black font-semibold rounded hover:bg-draper-gold-hover"
+            >
+              Save
+            </button>
+            <button
+              onClick={handleCancel}
+              className="px-3 py-1 text-xs bg-draper-dark text-draper-muted rounded hover:text-white"
+            >
+              Cancel
+            </button>
+          </>
+        ) : (
+          <>
+            <button
+              onClick={() => setIsApproved(!isApproved)}
+              className={`px-3 py-1 text-xs rounded font-semibold ${
+                isApproved
+                  ? "bg-green-500/20 text-green-400"
+                  : "bg-draper-dark text-draper-muted hover:text-white"
+              }`}
+            >
+              {isApproved ? "✓ Approved" : "Approve"}
+            </button>
+            <button
+              onClick={() => setIsEditing(true)}
+              className="px-3 py-1 text-xs bg-draper-dark text-draper-muted rounded hover:text-white"
+            >
+              Edit
+            </button>
+            <button
+              onClick={handleCopy}
+              className="px-3 py-1 text-xs bg-draper-dark text-draper-muted rounded hover:text-white"
+            >
+              {copied ? "Copied!" : "Copy"}
+            </button>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+```
+
+---
+
+##### File: `frontend/components/twitter-preview.tsx`
+
+**Purpose:** X/Twitter thread mock frame. Shows sequential tweets with a thread connector line and character counts.
+
+```tsx
+"use client";
+
+import { useState } from "react";
+
+interface TwitterPreviewProps {
+  thread: string[];
+  founderName: string;
+  onThreadChange?: (newThread: string[]) => void;
+}
+
+export function TwitterPreview({ thread, founderName, onThreadChange }: TwitterPreviewProps) {
+  const [isEditing, setIsEditing] = useState(false);
+  const [editValues, setEditValues] = useState(thread);
+  const [isApproved, setIsApproved] = useState(false);
+  const [copied, setCopied] = useState(false);
+
+  const handleSave = () => {
+    onThreadChange?.(editValues);
+    setIsEditing(false);
+  };
+
+  const handleCancel = () => {
+    setEditValues(thread);
+    setIsEditing(false);
+  };
+
+  const handleTweetChange = (index: number, value: string) => {
+    const updated = [...editValues];
+    updated[index] = value;
+    setEditValues(updated);
+  };
+
+  const handleCopy = async () => {
+    const fullThread = editValues.map((t, i) => `${i + 1}/${editValues.length} ${t}`).join("\n\n");
+    await navigator.clipboard.writeText(fullThread);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  // Generate a consistent handle from the founder name
+  const handle = `@${founderName.toLowerCase().replace(/\s+/g, "")}`;
+
+  return (
+    <div className={`bg-draper-charcoal border rounded-lg overflow-hidden ${isApproved ? "border-green-500/50" : "border-draper-border"}`}>
+      {/* Header — X branding */}
+      <div className="px-4 pt-3 pb-2 flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <span className="text-xs font-bold">𝕏</span>
+          <span className="text-xs text-draper-muted">Thread · {editValues.length} posts</span>
+        </div>
+        {isApproved && <span className="text-xs text-green-400">Approved</span>}
+      </div>
+
+      {/* Thread tweets */}
+      <div className="px-4 pb-3">
+        {editValues.map((tweet, i) => (
+          <div key={i} className="flex gap-3">
+            {/* Thread line + avatar */}
+            <div className="flex flex-col items-center">
+              <div className="w-8 h-8 rounded-full bg-draper-dark flex items-center justify-center text-xs font-bold text-draper-gold flex-shrink-0">
+                {founderName.charAt(0)}
+              </div>
+              {i < editValues.length - 1 && (
+                <div className="w-0.5 flex-1 bg-draper-border mt-1" />
+              )}
+            </div>
+
+            {/* Tweet content */}
+            <div className="flex-1 pb-4">
+              <div className="flex items-center gap-2 mb-1">
+                <span className="text-sm font-semibold">{founderName}</span>
+                <span className="text-xs text-draper-muted">{handle}</span>
+                <span className="text-xs text-draper-muted">· {i + 1}/{editValues.length}</span>
+              </div>
+              {isEditing ? (
+                <div>
+                  <textarea
+                    value={tweet}
+                    onChange={(e) => handleTweetChange(i, e.target.value)}
+                    className="w-full bg-draper-dark border border-draper-border rounded p-2 text-sm text-gray-300 resize-y min-h-[60px] focus:outline-none focus:border-draper-gold"
+                    rows={3}
+                  />
+                  <p className={`text-xs mt-1 ${tweet.length > 280 ? "text-red-400" : "text-draper-muted"}`}>
+                    {tweet.length}/280
+                  </p>
+                </div>
+              ) : (
+                <p className="text-sm text-gray-300 leading-relaxed">{tweet}</p>
+              )}
+
+              {/* Engagement icons (non-editing only) */}
+              {!isEditing && (
+                <div className="flex items-center gap-6 mt-2 text-xs text-draper-muted">
+                  <span>💬</span>
+                  <span>🔄</span>
+                  <span>❤️</span>
+                  <span>📤</span>
+                </div>
+              )}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* Action buttons */}
+      <div className="px-4 py-3 border-t border-draper-border flex items-center gap-2">
+        {isEditing ? (
+          <>
+            <button
+              onClick={handleSave}
+              className="px-3 py-1 text-xs bg-draper-gold text-black font-semibold rounded hover:bg-draper-gold-hover"
+            >
+              Save
+            </button>
+            <button
+              onClick={handleCancel}
+              className="px-3 py-1 text-xs bg-draper-dark text-draper-muted rounded hover:text-white"
+            >
+              Cancel
+            </button>
+          </>
+        ) : (
+          <>
+            <button
+              onClick={() => setIsApproved(!isApproved)}
+              className={`px-3 py-1 text-xs rounded font-semibold ${
+                isApproved
+                  ? "bg-green-500/20 text-green-400"
+                  : "bg-draper-dark text-draper-muted hover:text-white"
+              }`}
+            >
+              {isApproved ? "✓ Approved" : "Approve"}
+            </button>
+            <button
+              onClick={() => setIsEditing(true)}
+              className="px-3 py-1 text-xs bg-draper-dark text-draper-muted rounded hover:text-white"
+            >
+              Edit
+            </button>
+            <button
+              onClick={handleCopy}
+              className="px-3 py-1 text-xs bg-draper-dark text-draper-muted rounded hover:text-white"
+            >
+              {copied ? "Copied!" : "Copy"}
+            </button>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+```
+
+---
+
+##### File: `frontend/components/newsletter-preview.tsx`
+
+**Purpose:** Email/newsletter mock frame with subject line, body preview, and a "Read More" CTA.
+
+```tsx
+"use client";
+
+import { useState } from "react";
+
+interface NewsletterPreviewProps {
+  content: string;
+  founderName: string;
+  onContentChange?: (newContent: string) => void;
+}
+
+export function NewsletterPreview({ content, founderName, onContentChange }: NewsletterPreviewProps) {
+  const [isEditing, setIsEditing] = useState(false);
+  const [editValue, setEditValue] = useState(content);
+  const [isApproved, setIsApproved] = useState(false);
+  const [copied, setCopied] = useState(false);
+
+  // Extract a subject line from the first sentence
+  const subjectLine = editValue.split(/[.!?]/)[0]?.trim() || "This week's insight";
+
+  const handleSave = () => {
+    onContentChange?.(editValue);
+    setIsEditing(false);
+  };
+
+  const handleCancel = () => {
+    setEditValue(content);
+    setIsEditing(false);
+  };
+
+  const handleCopy = async () => {
+    await navigator.clipboard.writeText(editValue);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  return (
+    <div className={`bg-draper-charcoal border rounded-lg overflow-hidden ${isApproved ? "border-green-500/50" : "border-draper-border"}`}>
+      {/* Header — Email branding */}
+      <div className="px-4 pt-3 pb-2 flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <span className="text-xs">📧</span>
+          <span className="text-xs text-draper-muted">Newsletter Blurb</span>
+        </div>
+        {isApproved && <span className="text-xs text-green-400">Approved</span>}
+      </div>
+
+      {/* Email header mock */}
+      <div className="px-4 pb-2 border-b border-draper-border">
+        <div className="space-y-1">
+          <div className="flex items-center gap-2 text-xs">
+            <span className="text-draper-muted w-12">From:</span>
+            <span className="text-gray-300">{founderName}</span>
+          </div>
+          <div className="flex items-center gap-2 text-xs">
+            <span className="text-draper-muted w-12">Subject:</span>
+            <span className="text-white font-semibold">{subjectLine}</span>
+          </div>
+        </div>
+      </div>
+
+      {/* Email body */}
+      <div className="px-4 py-4">
+        {isEditing ? (
+          <textarea
+            value={editValue}
+            onChange={(e) => setEditValue(e.target.value)}
+            className="w-full bg-draper-dark border border-draper-border rounded p-3 text-sm text-gray-300 resize-y min-h-[120px] focus:outline-none focus:border-draper-gold"
+            rows={6}
+          />
+        ) : (
+          <div className="text-sm text-gray-300 leading-relaxed whitespace-pre-line">
+            {editValue}
+          </div>
+        )}
+      </div>
+
+      {/* CTA button mock */}
+      {!isEditing && (
+        <div className="px-4 pb-4">
+          <div className="inline-block px-4 py-2 bg-draper-gold/20 text-draper-gold text-xs font-semibold rounded cursor-default">
+            Read Full Article →
+          </div>
+        </div>
+      )}
+
+      {/* Action buttons */}
+      <div className="px-4 py-3 border-t border-draper-border flex items-center gap-2">
+        {isEditing ? (
+          <>
+            <button
+              onClick={handleSave}
+              className="px-3 py-1 text-xs bg-draper-gold text-black font-semibold rounded hover:bg-draper-gold-hover"
+            >
+              Save
+            </button>
+            <button
+              onClick={handleCancel}
+              className="px-3 py-1 text-xs bg-draper-dark text-draper-muted rounded hover:text-white"
+            >
+              Cancel
+            </button>
+          </>
+        ) : (
+          <>
+            <button
+              onClick={() => setIsApproved(!isApproved)}
+              className={`px-3 py-1 text-xs rounded font-semibold ${
+                isApproved
+                  ? "bg-green-500/20 text-green-400"
+                  : "bg-draper-dark text-draper-muted hover:text-white"
+              }`}
+            >
+              {isApproved ? "✓ Approved" : "Approve"}
+            </button>
+            <button
+              onClick={() => setIsEditing(true)}
+              className="px-3 py-1 text-xs bg-draper-dark text-draper-muted rounded hover:text-white"
+            >
+              Edit
+            </button>
+            <button
+              onClick={handleCopy}
+              className="px-3 py-1 text-xs bg-draper-dark text-draper-muted rounded hover:text-white"
+            >
+              {copied ? "Copied!" : "Copy"}
+            </button>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+```
+
+---
+
+##### File: `frontend/components/quote-card.tsx`
+
+**Purpose:** Branded visual quote card with serif font, gold accent bar, and the core quote. This is meant to look like an Instagram/social visual asset.
+
+```tsx
+"use client";
+
+import { useState } from "react";
+
+interface QuoteCardProps {
+  quote: string;
+  founderName: string;
+  onQuoteChange?: (newQuote: string) => void;
+}
+
+export function QuoteCard({ quote, founderName, onQuoteChange }: QuoteCardProps) {
+  const [isEditing, setIsEditing] = useState(false);
+  const [editValue, setEditValue] = useState(quote);
+  const [isApproved, setIsApproved] = useState(false);
+  const [copied, setCopied] = useState(false);
+
+  const handleSave = () => {
+    onQuoteChange?.(editValue);
+    setIsEditing(false);
+  };
+
+  const handleCancel = () => {
+    setEditValue(quote);
+    setIsEditing(false);
+  };
+
+  const handleCopy = async () => {
+    await navigator.clipboard.writeText(editValue);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  return (
+    <div className={`bg-draper-charcoal border rounded-lg overflow-hidden ${isApproved ? "border-green-500/50" : "border-draper-border"}`}>
+      {/* Header */}
+      <div className="px-4 pt-3 pb-2 flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <span className="text-xs">🎨</span>
+          <span className="text-xs text-draper-muted">Quote Card</span>
+        </div>
+        {isApproved && <span className="text-xs text-green-400">Approved</span>}
+      </div>
+
+      {/* Quote visual — the actual branded card */}
+      <div className="px-4 pb-3">
+        {isEditing ? (
+          <textarea
+            value={editValue}
+            onChange={(e) => setEditValue(e.target.value)}
+            className="w-full bg-draper-dark border border-draper-border rounded p-3 text-sm text-gray-300 resize-y min-h-[100px] focus:outline-none focus:border-draper-gold"
+            rows={4}
+          />
+        ) : (
+          <div className="bg-draper-black rounded-lg p-8 relative">
+            {/* Gold accent bar on the left */}
+            <div className="absolute left-0 top-4 bottom-4 w-1 bg-draper-gold rounded-r" />
+
+            {/* Opening quotation mark */}
+            <span className="text-4xl text-draper-gold/40 font-serif leading-none block mb-2">"</span>
+
+            {/* Quote text — serif font */}
+            <p className="text-lg font-serif text-white leading-relaxed pl-4">
+              {editValue}
+            </p>
+
+            {/* Attribution */}
+            <div className="mt-6 pl-4 flex items-center gap-3">
+              <div className="w-0.5 h-4 bg-draper-gold/40" />
+              <span className="text-sm text-draper-gold font-semibold">{founderName}</span>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Action buttons */}
+      <div className="px-4 py-3 border-t border-draper-border flex items-center gap-2">
+        {isEditing ? (
+          <>
+            <button
+              onClick={handleSave}
+              className="px-3 py-1 text-xs bg-draper-gold text-black font-semibold rounded hover:bg-draper-gold-hover"
+            >
+              Save
+            </button>
+            <button
+              onClick={handleCancel}
+              className="px-3 py-1 text-xs bg-draper-dark text-draper-muted rounded hover:text-white"
+            >
+              Cancel
+            </button>
+          </>
+        ) : (
+          <>
+            <button
+              onClick={() => setIsApproved(!isApproved)}
+              className={`px-3 py-1 text-xs rounded font-semibold ${
+                isApproved
+                  ? "bg-green-500/20 text-green-400"
+                  : "bg-draper-dark text-draper-muted hover:text-white"
+              }`}
+            >
+              {isApproved ? "✓ Approved" : "Approve"}
+            </button>
+            <button
+              onClick={() => setIsEditing(true)}
+              className="px-3 py-1 text-xs bg-draper-dark text-draper-muted rounded hover:text-white"
+            >
+              Edit
+            </button>
+            <button
+              onClick={handleCopy}
+              className="px-3 py-1 text-xs bg-draper-dark text-draper-muted rounded hover:text-white"
+            >
+              {copied ? "Copied!" : "Copy"}
+            </button>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+```
+
+---
+
+##### File: `frontend/app/review/page.tsx` (REPLACE existing Phase 3 placeholder)
+
+**Purpose:** The main review dashboard page. Two-panel layout: left panel (draft + scorecard), right panel (4 asset previews). Stats bar at top.
+
+```tsx
+"use client";
+
+import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
+import type { PipelineResult } from "@/lib/api";
+import { StatsBar } from "@/components/stats-bar";
+import { DraftPanel } from "@/components/draft-panel";
+import { LinkedInPreview } from "@/components/linkedin-preview";
+import { TwitterPreview } from "@/components/twitter-preview";
+import { NewsletterPreview } from "@/components/newsletter-preview";
+import { QuoteCard } from "@/components/quote-card";
+
+export default function ReviewPage() {
+  const router = useRouter();
+  const [results, setResults] = useState<PipelineResult | null>(null);
+  const [founderName, setFounderName] = useState("Founder");
+
+  useEffect(() => {
+    const stored = sessionStorage.getItem("pipeline_results");
+    if (!stored) {
+      router.push("/");
+      return;
+    }
+    setResults(JSON.parse(stored));
+
+    // Try to get founder name from pipeline request (stored by home page)
+    const storedName = sessionStorage.getItem("founder_name");
+    if (storedName) {
+      setFounderName(storedName);
+    }
+  }, [router]);
+
+  if (!results) {
+    return (
+      <div className="flex items-center justify-center min-h-[400px]">
+        <div className="text-center space-y-4">
+          <div className="w-8 h-8 border-2 border-draper-gold border-t-transparent rounded-full animate-spin mx-auto" />
+          <p className="text-draper-muted">Loading review...</p>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-6">
+      {/* Page Header */}
+      <div className="text-center space-y-2">
+        <h1 className="text-2xl font-bold">Review Dashboard</h1>
+        <p className="text-draper-muted text-sm">
+          Review, edit, and approve your authority content
+        </p>
+      </div>
+
+      {/* Stats Bar */}
+      <StatsBar
+        totalDurationMs={results.metadata.total_duration_ms}
+        estimatedCostUsd={results.metadata.estimated_cost_usd}
+        overallScore={results.critique_scorecard.overall}
+        passed={results.critique_scorecard.passed}
+        revisionLoops={results.metadata.revision_loops}
+        inputWordCount={results.metadata.input_word_count}
+        outputWordCount={results.metadata.output_word_count}
+      />
+
+      {/* Two-Panel Layout */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        {/* Left Panel — Draft + Scorecard */}
+        <DraftPanel
+          draft={results.long_form_draft}
+          scorecard={results.critique_scorecard}
+          revisionLoops={results.metadata.revision_loops}
+          founderName={founderName}
+        />
+
+        {/* Right Panel — Platform Asset Previews */}
+        <div className="space-y-4">
+          <LinkedInPreview
+            content={results.assets.linkedin_post}
+            founderName={founderName}
+          />
+
+          <TwitterPreview
+            thread={results.assets.x_thread}
+            founderName={founderName}
+          />
+
+          <NewsletterPreview
+            content={results.assets.newsletter_blurb}
+            founderName={founderName}
+          />
+
+          <QuoteCard
+            quote={results.assets.quote_card_text}
+            founderName={founderName}
+          />
+        </div>
+      </div>
+
+      {/* Back to Home */}
+      <div className="text-center pb-8">
+        <button
+          onClick={() => {
+            sessionStorage.clear();
+            router.push("/");
+          }}
+          className="px-6 py-2 text-sm bg-draper-dark text-draper-muted rounded-lg hover:text-white border border-draper-border"
+        >
+          ← Start New Generation
+        </button>
+      </div>
+    </div>
+  );
+}
+```
+
+---
+
+##### File: `frontend/app/page.tsx` (MINOR UPDATE — store founder_name in sessionStorage)
+
+**One small addition needed:** After storing `pipeline_id`, also store `founder_name` so the review page can display it in platform previews. Add this line inside `handleSubmit`, right after the `sessionStorage.setItem("pipeline_id", pipeline_id)` line:
+
+```tsx
+// EXISTING LINE (keep):
+sessionStorage.setItem("pipeline_id", pipeline_id);
+
+// ADD THIS LINE after it:
+sessionStorage.setItem("founder_name", data.founderName);
+
+// EXISTING LINE (keep):
+router.push("/pipeline");
+```
+
+This is the only change to `page.tsx`. Everything else stays the same from Phase 2/3.
+
+---
+
+#### Phase 4: Design Decisions & Notes for Implementation
+
+1. **No backend changes.** Phase 4 is entirely frontend. All data comes from `PipelineResult` already stored in `sessionStorage`.
+
+2. **Edit is local-only.** Editing an asset updates local React state. There's no API call to persist edits — this is a demo. The `onContentChange` callback props are available for future use but not wired to anything in Phase 4.
+
+3. **Approve is visual-only.** Toggling "Approve" adds a green border and checkmark. No API call — it's a UI state toggle for demo purposes.
+
+4. **Copy to clipboard** uses `navigator.clipboard.writeText()`. For the X thread, it formats as numbered tweets.
+
+5. **Subject line for newsletter** is auto-extracted from the first sentence of the blurb. No separate field needed.
+
+6. **Quote card** uses `font-serif` (Playfair Display) — already loaded in `globals.css` via Google Fonts import.
+
+7. **Responsive layout:** `grid-cols-1 lg:grid-cols-2` — stacks vertically on mobile/tablet, side-by-side on laptop (1024px+). This is ideal for the demo laptop/projection scenario.
+
+8. **Scorecard reuse:** The `DraftPanel` imports and renders the existing `Scorecard` component from Phase 3. No duplication.
+
+9. **"Start New Generation" button** clears sessionStorage and returns to home page. Clean state reset for demo re-runs.
+
+---
+
+#### Phase 4: Verification Checklist
+
+- [ ] Review page loads correctly after pipeline completes (redirect from `/pipeline`)
+- [ ] Stats bar shows all 6 metrics (time, cost, score, revisions, input words, output words)
+- [ ] Left panel shows full draft text with proper paragraph breaks
+- [ ] Left panel shows scorecard with all 6 metric bars (reusing Phase 3 Scorecard component)
+- [ ] LinkedIn preview shows avatar initial, name, "Founder & CEO", post body, engagement bar
+- [ ] X thread shows sequential tweets with thread connector line and character counts
+- [ ] Newsletter shows From/Subject header, body text, "Read Full Article" CTA button
+- [ ] Quote card shows gold accent bar, serif font quote, attribution
+- [ ] Edit button on each asset opens inline textarea
+- [ ] Save/Cancel in edit mode work correctly
+- [ ] Approve button toggles green border + "✓ Approved" badge
+- [ ] Copy button copies content to clipboard with "Copied!" feedback
+- [ ] "Start New Generation" button clears session and returns to home
+- [ ] Two-panel layout works at 1440px (side-by-side) and stacks on narrow screens
+- [ ] All components use Draper brand tokens (draper-charcoal, draper-border, draper-gold, etc.)
 
 ---
 
