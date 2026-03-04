@@ -1905,37 +1905,822 @@ npm run dev
 
 ---
 
-### Phase 3: Pipeline Visualization
-**Goal:** Real-time agent execution flow visible on `/pipeline` page. The "wow" moment where agents light up one by one.
+### Phase 3: Pipeline Visualization — DETAILED IMPLEMENTATION SPEC
 
-**What gets built:**
-- **Backend additions:**
-  - `GET /api/pipeline/{id}/status` endpoint with per-agent status tracking
-  - In-memory status store updated after each agent completes
-  - Each agent status includes: `waiting` | `processing` | `complete` | `failed`, `duration_ms`, `output_preview`
-- **Frontend — Pipeline page (`/pipeline`):**
-  - Horizontal flow of 5 agent cards connected by arrows/lines
-  - Each card shows: agent name, icon, status badge, elapsed time
-  - `waiting` = dim/grey, `processing` = pulsing animation, `complete` = green glow, `failed` = red
-  - Polling mechanism (every 1-2 seconds) to update agent statuses from backend
-  - Critique Agent card expands to show live scorecard with 6 metric bars
-  - If revision loop triggered: visual indicator (loop arrow, "Revision 1 of 2" badge)
-  - Auto-redirect to `/review` when all agents complete
+**Goal:** Real-time agent execution flow visible on `/pipeline` page. The "wow" moment where agents light up one by one. This is what makes the demo feel like a *product* instead of a ChatGPT wrapper.
 
 **What's NOT in Phase 3:**
 - No WebSocket/SSE (polling is simpler and sufficient for demo)
-- No review dashboard content yet
+- No review dashboard yet (Phase 4)
 
-**Key files:**
-| File | Purpose |
-|------|---------|
-| `frontend/app/pipeline/page.tsx` | Pipeline visualization page |
-| `frontend/components/pipeline-flow.tsx` | Horizontal agent flow layout |
-| `frontend/components/agent-card.tsx` | Individual agent status card with animations |
-| `frontend/components/scorecard.tsx` | Critique scorecard with metric bars |
-| `backend/main.py` | Updated with status tracking + status endpoint |
+---
 
-**Verification:** Start pipeline → watch agents light up sequentially in browser → critique scorecard populates with scores → auto-redirects to `/review`.
+#### Phase 3.1: Backend — Async Pipeline with Status Tracking
+
+The Phase 1 pipeline runs synchronously — the `POST /api/pipeline/start` endpoint blocks until all agents complete. Phase 3 changes this to **async execution with per-agent status tracking**, so the frontend can poll for progress.
+
+**Changes to `backend/main.py`:**
+
+Replace the existing `start_pipeline` function and add the status endpoint. The pipeline now runs in a **background thread** and updates an in-memory status store as each agent completes.
+
+```python
+import uuid
+import time
+import threading
+from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
+
+from models.schemas import (
+    PipelineRequest, PipelineResponse, PipelineResult,
+    CritiqueScore, CascadeOutput
+)
+from agents.ingestion import run_ingestion
+from agents.extraction import run_extraction
+from agents.synthesis import run_synthesis
+from agents.critique import run_critique
+from agents.cascade import run_cascade
+from config import *
+
+app = FastAPI(title="Draper AI Authority Engine", version="0.1.0")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:3000"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# In-memory stores (demo only)
+pipeline_store: dict = {}     # pipeline_id -> PipelineResult
+pipeline_status: dict = {}    # pipeline_id -> status dict with per-agent tracking
+
+
+def run_pipeline_async(pipeline_id: str, request: PipelineRequest):
+    """
+    Runs the full 5-agent pipeline in a background thread.
+    Updates pipeline_status after each agent completes so the
+    frontend can poll for real-time progress.
+    """
+    start_time = time.time()
+
+    # Initialize all agent statuses to "waiting"
+    agent_names = ["ingestion", "extraction", "synthesis", "critique", "cascade"]
+    for name in agent_names:
+        pipeline_status[pipeline_id]["agents"][name] = {
+            "status": "waiting",
+            "duration_ms": None,
+            "output_preview": None,
+        }
+
+    try:
+        # ---- Agent 1: Ingestion ----
+        pipeline_status[pipeline_id]["agents"]["ingestion"]["status"] = "processing"
+        agent_start = time.time()
+
+        ingestion_result = run_ingestion(request.content)
+
+        pipeline_status[pipeline_id]["agents"]["ingestion"] = {
+            "status": "complete",
+            "duration_ms": int((time.time() - agent_start) * 1000),
+            "output_preview": ingestion_result.transcript[:200] + "..." if len(ingestion_result.transcript) > 200 else ingestion_result.transcript,
+        }
+
+        # ---- Agent 2: Extraction ----
+        pipeline_status[pipeline_id]["agents"]["extraction"]["status"] = "processing"
+        agent_start = time.time()
+
+        extraction_result = run_extraction(ingestion_result.transcript)
+
+        pipeline_status[pipeline_id]["agents"]["extraction"] = {
+            "status": "complete",
+            "duration_ms": int((time.time() - agent_start) * 1000),
+            "output_preview": f"{len(extraction_result.themes)} themes, {len(extraction_result.contrarian_angles)} angles extracted",
+        }
+
+        # ---- Agent 3 + 4: Synthesis with Critique Loop ----
+        max_revisions = 2
+        revision_count = 0
+        draft = ""
+        critique_result = None
+
+        for attempt in range(max_revisions + 1):
+            # Synthesis
+            pipeline_status[pipeline_id]["agents"]["synthesis"]["status"] = "processing"
+            agent_start = time.time()
+
+            if attempt == 0:
+                draft = run_synthesis(
+                    extraction_result,
+                    request.voice_profile,
+                    request.founder_name
+                )
+            else:
+                revision_prompt_addition = f"\n\nPREVIOUS DRAFT WAS REJECTED. REVISION INSTRUCTIONS:\n{critique_result.revision_notes}\n\nRewrite the piece addressing these specific issues."
+                draft = run_synthesis(
+                    extraction_result,
+                    request.voice_profile + revision_prompt_addition,
+                    request.founder_name
+                )
+
+            pipeline_status[pipeline_id]["agents"]["synthesis"] = {
+                "status": "complete",
+                "duration_ms": int((time.time() - agent_start) * 1000),
+                "output_preview": draft[:200] + "..." if len(draft) > 200 else draft,
+            }
+
+            # Critique
+            pipeline_status[pipeline_id]["agents"]["critique"]["status"] = "processing"
+            agent_start = time.time()
+
+            critique_result = run_critique(draft, request.voice_profile)
+
+            critique_status = {
+                "status": "complete",
+                "duration_ms": int((time.time() - agent_start) * 1000),
+                "output_preview": f"Score: {critique_result.overall}/100",
+                "scores": {
+                    "ai_detection_risk": critique_result.ai_detection_risk,
+                    "readability": critique_result.readability,
+                    "contrarian_strength": critique_result.contrarian_strength,
+                    "voice_authenticity": critique_result.voice_authenticity,
+                    "hook_power": critique_result.hook_power,
+                    "actionable_density": critique_result.actionable_density,
+                    "overall": critique_result.overall,
+                },
+                "passed": critique_result.passed,
+                "revision_count": revision_count,
+            }
+            pipeline_status[pipeline_id]["agents"]["critique"] = critique_status
+
+            if critique_result.passed:
+                break
+
+            revision_count += 1
+            # Update revision count in status so frontend can show "Revision 1 of 2"
+            pipeline_status[pipeline_id]["agents"]["critique"]["revision_count"] = revision_count
+            # Reset synthesis to "waiting" for the revision loop
+            pipeline_status[pipeline_id]["agents"]["synthesis"]["status"] = "revising"
+
+        # ---- Agent 5: Cascade ----
+        pipeline_status[pipeline_id]["agents"]["cascade"]["status"] = "processing"
+        agent_start = time.time()
+
+        cascade_result = run_cascade(draft)
+
+        pipeline_status[pipeline_id]["agents"]["cascade"] = {
+            "status": "complete",
+            "duration_ms": int((time.time() - agent_start) * 1000),
+            "output_preview": f"4 assets generated",
+        }
+
+        total_duration_ms = int((time.time() - start_time) * 1000)
+
+        # Store final results
+        pipeline_store[pipeline_id] = PipelineResult(
+            pipeline_id=pipeline_id,
+            long_form_draft=draft,
+            critique_scorecard=critique_result,
+            assets=cascade_result,
+            metadata={
+                "total_duration_ms": total_duration_ms,
+                "estimated_cost_usd": 0.15,
+                "revision_loops": revision_count,
+                "input_word_count": ingestion_result.word_count,
+                "output_word_count": len(draft.split()),
+            }
+        )
+
+        pipeline_status[pipeline_id]["status"] = "complete"
+
+    except Exception as e:
+        pipeline_status[pipeline_id]["status"] = "failed"
+        pipeline_status[pipeline_id]["error"] = str(e)
+        pipeline_store[pipeline_id] = None
+
+
+@app.post("/api/pipeline/start", response_model=PipelineResponse)
+async def start_pipeline(request: PipelineRequest):
+    """
+    Starts the pipeline asynchronously in a background thread.
+    Returns immediately with a pipeline_id for status polling.
+    """
+    pipeline_id = str(uuid.uuid4())
+
+    # Initialize status
+    pipeline_status[pipeline_id] = {
+        "pipeline_id": pipeline_id,
+        "status": "processing",
+        "agents": {},
+        "error": None,
+    }
+
+    # Run pipeline in background thread
+    thread = threading.Thread(
+        target=run_pipeline_async,
+        args=(pipeline_id, request),
+        daemon=True
+    )
+    thread.start()
+
+    return PipelineResponse(pipeline_id=pipeline_id, status="started")
+
+
+@app.get("/api/pipeline/{pipeline_id}/status")
+async def get_status(pipeline_id: str):
+    """
+    Returns current status of the pipeline including per-agent progress.
+    Frontend polls this every 1-2 seconds.
+    """
+    if pipeline_id not in pipeline_status:
+        raise HTTPException(status_code=404, detail="Pipeline not found")
+    return pipeline_status[pipeline_id]
+
+
+@app.get("/api/pipeline/{pipeline_id}/results", response_model=PipelineResult)
+async def get_results(pipeline_id: str):
+    """Return stored pipeline results by ID. Only available after pipeline completes."""
+    if pipeline_id not in pipeline_store:
+        raise HTTPException(status_code=404, detail="Pipeline not found")
+    result = pipeline_store[pipeline_id]
+    if result is None:
+        raise HTTPException(status_code=500, detail="Pipeline failed")
+    return result
+
+
+@app.get("/health")
+async def health():
+    return {"status": "ok"}
+```
+
+**Key changes from Phase 1:**
+- `start_pipeline` now returns immediately with `"status": "started"` (not `"complete"`)
+- Pipeline runs in a `threading.Thread` (simple, sufficient for demo)
+- New `pipeline_status` store tracks per-agent progress
+- New `GET /api/pipeline/{id}/status` endpoint for polling
+- Critique agent status includes `scores` object and `revision_count`
+
+---
+
+#### Phase 3.2: Frontend — Update API Client
+
+**Add to `frontend/lib/api.ts`:**
+
+```typescript
+// Add this interface
+export interface AgentStatus {
+  status: "waiting" | "processing" | "complete" | "failed" | "revising";
+  duration_ms: number | null;
+  output_preview: string | null;
+  // Only present on critique agent:
+  scores?: {
+    ai_detection_risk: number;
+    readability: number;
+    contrarian_strength: number;
+    voice_authenticity: number;
+    hook_power: number;
+    actionable_density: number;
+    overall: number;
+  };
+  passed?: boolean;
+  revision_count?: number;
+}
+
+export interface PipelineStatus {
+  pipeline_id: string;
+  status: "processing" | "complete" | "failed";
+  agents: Record<string, AgentStatus>;
+  error: string | null;
+}
+
+// Add this function
+export async function getPipelineStatus(
+  pipelineId: string
+): Promise<PipelineStatus> {
+  const res = await fetch(`${API_BASE}/api/pipeline/${pipelineId}/status`);
+
+  if (!res.ok) {
+    const error = await res.json().catch(() => ({ detail: "Unknown error" }));
+    throw new Error(error.detail || `Failed to get status: ${res.status}`);
+  }
+
+  return res.json();
+}
+```
+
+**Also update `startPipeline`** — the response now returns `"started"` instead of `"complete"`, so the home page flow changes:
+
+**Update `frontend/app/page.tsx` `handleSubmit`:**
+
+```typescript
+const handleSubmit = async (data: {
+  content: string;
+  voiceProfile: string;
+  founderName: string;
+}) => {
+  setIsLoading(true);
+  setError(null);
+
+  try {
+    const { pipeline_id } = await startPipeline({
+      input_type: "text",
+      content: data.content,
+      voice_profile: data.voiceProfile,
+      founder_name: data.founderName,
+    });
+
+    // Store pipeline_id — the pipeline page will poll for status
+    sessionStorage.setItem("pipeline_id", pipeline_id);
+
+    // Navigate to pipeline page immediately (don't wait for completion)
+    router.push("/pipeline");
+  } catch (err) {
+    setError(err instanceof Error ? err.message : "Something went wrong");
+    setIsLoading(false);
+  }
+};
+```
+
+**Key change:** No longer calls `getPipelineResults` here. The pipeline page handles polling.
+
+---
+
+#### Phase 3.3: Frontend — Agent Card Component
+
+**`frontend/components/agent-card.tsx`:**
+
+```tsx
+"use client";
+
+import { Card } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import type { AgentStatus } from "@/lib/api";
+
+interface AgentCardProps {
+  name: string;
+  description: string;
+  icon: string;  // emoji
+  status: AgentStatus | null;
+  isActive: boolean;
+}
+
+export function AgentCard({ name, description, icon, status, isActive }: AgentCardProps) {
+  const agentStatus = status?.status || "waiting";
+
+  const statusStyles: Record<string, string> = {
+    waiting: "border-draper-border opacity-40",
+    processing: "border-draper-gold shadow-[0_0_20px_rgba(201,168,76,0.15)] animate-pulse",
+    complete: "border-green-500/50 shadow-[0_0_15px_rgba(34,197,94,0.1)]",
+    failed: "border-red-500/50 shadow-[0_0_15px_rgba(239,68,68,0.1)]",
+    revising: "border-amber-500/50 shadow-[0_0_15px_rgba(245,158,11,0.1)]",
+  };
+
+  const badgeStyles: Record<string, string> = {
+    waiting: "bg-draper-border text-draper-muted",
+    processing: "bg-draper-gold/20 text-draper-gold",
+    complete: "bg-green-500/20 text-green-400",
+    failed: "bg-red-500/20 text-red-400",
+    revising: "bg-amber-500/20 text-amber-400",
+  };
+
+  const badgeText: Record<string, string> = {
+    waiting: "Waiting",
+    processing: "Processing",
+    complete: "Complete",
+    failed: "Failed",
+    revising: "Revising",
+  };
+
+  return (
+    <Card
+      className={`bg-draper-charcoal p-4 space-y-3 transition-all duration-500 border ${statusStyles[agentStatus]} min-w-[180px]`}
+    >
+      {/* Header */}
+      <div className="flex items-center justify-between">
+        <span className="text-xl">{icon}</span>
+        <Badge className={`text-xs ${badgeStyles[agentStatus]}`}>
+          {badgeText[agentStatus]}
+        </Badge>
+      </div>
+
+      {/* Name & Description */}
+      <div>
+        <h3 className="text-sm font-semibold">{name}</h3>
+        <p className="text-xs text-draper-muted">{description}</p>
+      </div>
+
+      {/* Duration (only when complete) */}
+      {status?.duration_ms != null && (
+        <p className="text-xs font-mono text-draper-muted">
+          {(status.duration_ms / 1000).toFixed(1)}s
+        </p>
+      )}
+
+      {/* Output Preview (only when complete) */}
+      {status?.output_preview && agentStatus === "complete" && (
+        <p className="text-xs text-draper-muted/70 truncate">
+          {status.output_preview}
+        </p>
+      )}
+    </Card>
+  );
+}
+```
+
+---
+
+#### Phase 3.4: Frontend — Critique Scorecard Component
+
+**`frontend/components/scorecard.tsx`:**
+
+```tsx
+"use client";
+
+interface ScoreBarProps {
+  label: string;
+  value: number;
+  max: number;
+  target: number;
+  unit?: string;
+  invertColor?: boolean; // true for AI risk where lower is better
+}
+
+function ScoreBar({ label, value, max, target, unit = "", invertColor = false }: ScoreBarProps) {
+  const percentage = (value / max) * 100;
+  const isGood = invertColor ? value <= target : value >= target;
+
+  return (
+    <div className="space-y-1">
+      <div className="flex justify-between text-xs">
+        <span className="text-draper-muted">{label}</span>
+        <span className={`font-mono ${isGood ? "text-green-400" : "text-amber-400"}`}>
+          {value}{unit}
+        </span>
+      </div>
+      <div className="h-1.5 bg-draper-dark rounded-full overflow-hidden">
+        <div
+          className={`h-full rounded-full transition-all duration-1000 ease-out ${
+            isGood ? "bg-green-500" : "bg-amber-500"
+          }`}
+          style={{ width: `${Math.min(percentage, 100)}%` }}
+        />
+      </div>
+    </div>
+  );
+}
+
+interface ScorecardProps {
+  scores: {
+    ai_detection_risk: number;
+    readability: number;
+    contrarian_strength: number;
+    voice_authenticity: number;
+    hook_power: number;
+    actionable_density: number;
+    overall: number;
+  };
+  passed: boolean;
+  revisionCount: number;
+}
+
+export function Scorecard({ scores, passed, revisionCount }: ScorecardProps) {
+  return (
+    <div className="bg-draper-dark border border-draper-border rounded-lg p-4 space-y-3">
+      {/* Header */}
+      <div className="flex items-center justify-between">
+        <h4 className="text-sm font-semibold">Quality Gate</h4>
+        <div className="flex items-center gap-2">
+          {revisionCount > 0 && (
+            <span className="text-xs text-amber-400">
+              Rev {revisionCount}/2
+            </span>
+          )}
+          <span
+            className={`text-xs font-mono px-2 py-0.5 rounded ${
+              passed
+                ? "bg-green-500/20 text-green-400"
+                : "bg-red-500/20 text-red-400"
+            }`}
+          >
+            {scores.overall}/100 {passed ? "PASS" : "FAIL"}
+          </span>
+        </div>
+      </div>
+
+      {/* Score Bars */}
+      <div className="space-y-2">
+        <ScoreBar
+          label="AI Detection Risk"
+          value={scores.ai_detection_risk}
+          max={100}
+          target={15}
+          unit="%"
+          invertColor={true}
+        />
+        <ScoreBar
+          label="Readability"
+          value={scores.readability}
+          max={100}
+          target={65}
+        />
+        <ScoreBar
+          label="Contrarian Strength"
+          value={scores.contrarian_strength}
+          max={10}
+          target={7}
+          unit="/10"
+        />
+        <ScoreBar
+          label="Voice Authenticity"
+          value={scores.voice_authenticity}
+          max={10}
+          target={7}
+          unit="/10"
+        />
+        <ScoreBar
+          label="Hook Power"
+          value={scores.hook_power}
+          max={10}
+          target={7}
+          unit="/10"
+        />
+        <ScoreBar
+          label="Actionable Density"
+          value={scores.actionable_density}
+          max={10}
+          target={6}
+          unit="/10"
+        />
+      </div>
+    </div>
+  );
+}
+```
+
+---
+
+#### Phase 3.5: Frontend — Pipeline Flow Component
+
+**`frontend/components/pipeline-flow.tsx`:**
+
+```tsx
+"use client";
+
+import { AgentCard } from "@/components/agent-card";
+import { Scorecard } from "@/components/scorecard";
+import type { PipelineStatus } from "@/lib/api";
+
+interface PipelineFlowProps {
+  status: PipelineStatus | null;
+}
+
+const AGENTS = [
+  { key: "ingestion", name: "Ingestion", description: "Cleaning raw input", icon: "📥" },
+  { key: "extraction", name: "Extraction", description: "Mining themes & angles", icon: "🔍" },
+  { key: "synthesis", name: "Synthesis", description: "Drafting authority piece", icon: "✍️" },
+  { key: "critique", name: "Critique", description: "Quality scoring", icon: "⚖️" },
+  { key: "cascade", name: "Cascade", description: "Multi-platform assets", icon: "📤" },
+];
+
+export function PipelineFlow({ status }: PipelineFlowProps) {
+  const critiqueAgent = status?.agents?.critique;
+  const showScorecard = critiqueAgent && (critiqueAgent.status === "complete" || critiqueAgent.passed !== undefined);
+
+  return (
+    <div className="space-y-6">
+      {/* Agent Cards — horizontal scroll on mobile, flex on desktop */}
+      <div className="flex items-start gap-3 overflow-x-auto pb-4">
+        {AGENTS.map((agent, i) => (
+          <div key={agent.key} className="flex items-center gap-3">
+            <AgentCard
+              name={agent.name}
+              description={agent.description}
+              icon={agent.icon}
+              status={status?.agents?.[agent.key] || null}
+              isActive={status?.agents?.[agent.key]?.status === "processing"}
+            />
+            {/* Arrow between cards (not after last) */}
+            {i < AGENTS.length - 1 && (
+              <div className="text-draper-muted text-lg flex-shrink-0">→</div>
+            )}
+          </div>
+        ))}
+      </div>
+
+      {/* Scorecard — appears below when critique agent completes */}
+      {showScorecard && critiqueAgent?.scores && (
+        <Scorecard
+          scores={critiqueAgent.scores}
+          passed={critiqueAgent.passed || false}
+          revisionCount={critiqueAgent.revision_count || 0}
+        />
+      )}
+    </div>
+  );
+}
+```
+
+---
+
+#### Phase 3.6: Frontend — Pipeline Page (Full Replacement)
+
+**Replace `frontend/app/pipeline/page.tsx` entirely:**
+
+```tsx
+"use client";
+
+import { useEffect, useState, useCallback } from "react";
+import { useRouter } from "next/navigation";
+import { PipelineFlow } from "@/components/pipeline-flow";
+import { getPipelineStatus, getPipelineResults, PipelineStatus, PipelineResult } from "@/lib/api";
+
+export default function PipelinePage() {
+  const router = useRouter();
+  const [status, setStatus] = useState<PipelineStatus | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const pipelineId = typeof window !== "undefined"
+    ? sessionStorage.getItem("pipeline_id")
+    : null;
+
+  const pollStatus = useCallback(async () => {
+    if (!pipelineId) return;
+
+    try {
+      const currentStatus = await getPipelineStatus(pipelineId);
+      setStatus(currentStatus);
+
+      if (currentStatus.status === "complete") {
+        // Fetch full results and store for review page
+        const results = await getPipelineResults(pipelineId);
+        sessionStorage.setItem("pipeline_results", JSON.stringify(results));
+
+        // Brief pause so user sees the final "complete" state, then redirect
+        setTimeout(() => {
+          router.push("/review");
+        }, 2000);
+      } else if (currentStatus.status === "failed") {
+        setError(currentStatus.error || "Pipeline failed");
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to get status");
+    }
+  }, [pipelineId, router]);
+
+  useEffect(() => {
+    if (!pipelineId) {
+      router.push("/");
+      return;
+    }
+
+    // Poll every 1.5 seconds
+    pollStatus(); // immediate first call
+    const interval = setInterval(pollStatus, 1500);
+
+    return () => clearInterval(interval);
+  }, [pipelineId, pollStatus, router]);
+
+  if (!pipelineId) {
+    return null; // redirecting to home
+  }
+
+  return (
+    <div className="space-y-8">
+      {/* Header */}
+      <div className="text-center space-y-2">
+        <h1 className="text-2xl font-bold">
+          {status?.status === "complete"
+            ? "Pipeline Complete"
+            : status?.status === "failed"
+            ? "Pipeline Failed"
+            : "Generating Authority Content"}
+        </h1>
+        <p className="text-draper-muted text-sm">
+          {status?.status === "complete"
+            ? "Redirecting to review..."
+            : status?.status === "failed"
+            ? "An error occurred during generation"
+            : "Watch each agent process your content in real-time"}
+        </p>
+      </div>
+
+      {/* Pipeline Flow Visualization */}
+      <PipelineFlow status={status} />
+
+      {/* Error */}
+      {error && (
+        <div className="bg-red-900/20 border border-red-800 rounded-lg p-4 text-red-400 text-sm">
+          {error}
+        </div>
+      )}
+    </div>
+  );
+}
+```
+
+---
+
+#### Phase 3.7: Frontend — Review Page Placeholder
+
+**Create `frontend/app/review/page.tsx`:**
+
+This is a simple placeholder that reads results from sessionStorage. Phase 4 will replace it with the full review dashboard.
+
+```tsx
+"use client";
+
+import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
+import { PipelineResult } from "@/lib/api";
+
+export default function ReviewPage() {
+  const router = useRouter();
+  const [results, setResults] = useState<PipelineResult | null>(null);
+
+  useEffect(() => {
+    const stored = sessionStorage.getItem("pipeline_results");
+    if (!stored) {
+      router.push("/");
+      return;
+    }
+    setResults(JSON.parse(stored));
+  }, [router]);
+
+  if (!results) {
+    return (
+      <div className="flex items-center justify-center min-h-[400px]">
+        <div className="text-center space-y-4">
+          <div className="w-8 h-8 border-2 border-draper-gold border-t-transparent rounded-full animate-spin mx-auto" />
+          <p className="text-draper-muted">Loading review...</p>
+        </div>
+      </div>
+    );
+  }
+
+  // Phase 3 placeholder — Phase 4 replaces with full review dashboard
+  return (
+    <div className="space-y-6">
+      <div className="text-center space-y-2">
+        <h1 className="text-2xl font-bold">Review Dashboard</h1>
+        <p className="text-draper-muted text-sm">
+          Generated in {(results.metadata.total_duration_ms / 1000).toFixed(1)}s | Quality: {results.critique_scorecard.overall}/100
+        </p>
+      </div>
+
+      <div className="bg-draper-charcoal border border-draper-border rounded-lg p-6 text-sm text-draper-muted">
+        Full review dashboard coming in Phase 4. Results are loaded and ready.
+        <pre className="mt-4 text-xs overflow-auto max-h-[400px]">
+          {JSON.stringify(results, null, 2)}
+        </pre>
+      </div>
+    </div>
+  );
+}
+```
+
+---
+
+#### Phase 3.8: Verification
+
+**How to test Phase 3 is complete:**
+
+1. **Start both servers:**
+```bash
+# Terminal 1:
+cd backend && uvicorn main:app --reload --port 8000
+
+# Terminal 2:
+cd frontend && npm run dev
+```
+
+2. **Open browser:** `http://localhost:3000`
+
+3. **Submit the sample brain-dump** from Section 8 of this PRD
+
+4. **Verify the pipeline page:**
+   - Should redirect to `/pipeline` immediately (NOT wait for completion)
+   - 5 agent cards displayed horizontally with arrows between them
+   - Cards light up one by one: grey (waiting) → gold pulse (processing) → green (complete)
+   - Each completed card shows duration in seconds
+   - Critique card shows the scorecard with 6 metric bars below the flow
+   - Score bars animate in with color coding (green = pass target, amber = below target)
+   - If critique rejects the draft, synthesis card briefly shows "Revising" state
+   - After all agents complete, page shows "Pipeline Complete" and auto-redirects to `/review` after 2 seconds
+
+5. **Verify the review page:**
+   - Should display "Review Dashboard" header with generation time and quality score
+   - Raw JSON results visible (placeholder — Phase 4 replaces with full dashboard)
+
+6. **Test error handling:**
+   - Stop the backend mid-pipeline → pipeline page should show error state
+   - Navigate to `/pipeline` without running a pipeline → should redirect to `/`
+
+**Phase 3 is DONE when:**
+- Pipeline page shows real-time agent progress via polling
+- Cards animate through waiting → processing → complete states
+- Critique scorecard appears with animated score bars
+- Auto-redirect to `/review` after pipeline completes
+- No polling continues after redirect (interval is cleared)
 
 ---
 
