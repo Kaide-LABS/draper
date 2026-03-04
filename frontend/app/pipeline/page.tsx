@@ -5,6 +5,8 @@ import { useRouter } from "next/navigation";
 import { PipelineFlow } from "@/components/pipeline-flow";
 import { getPipelineStatus, getPipelineResults, PipelineStatus, PipelineResult } from "@/lib/api";
 
+import { ErrorBoundary } from "@/components/error-boundary";
+
 export default function PipelinePage() {
   const router = useRouter();
   const [status, setStatus] = useState<PipelineStatus | null>(null);
@@ -76,12 +78,23 @@ export default function PipelinePage() {
       </div>
 
       {/* Pipeline Flow Visualization */}
-      <PipelineFlow status={status} />
+      <ErrorBoundary>
+        <PipelineFlow status={status} />
+      </ErrorBoundary>
 
       {/* Error */}
       {error && (
-        <div className="bg-red-900/20 border border-red-800 rounded-lg p-4 text-red-400 text-sm">
-          {error}
+        <div className="bg-red-900/20 border border-red-800 rounded-lg p-4 text-center space-y-3">
+          <p className="text-red-400 text-sm">{error}</p>
+          <button
+            onClick={() => {
+              sessionStorage.clear();
+              router.push("/");
+            }}
+            className="px-4 py-2 text-xs bg-draper-dark text-draper-muted rounded hover:text-white border border-draper-border"
+          >
+            ← Back to Start
+          </button>
         </div>
       )}
     </div>

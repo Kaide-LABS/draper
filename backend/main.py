@@ -1,5 +1,6 @@
 import uuid
 import time
+import json
 import threading
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -52,7 +53,7 @@ def run_pipeline_async(pipeline_id: str, request: PipelineRequest):
         pipeline_status[pipeline_id]["agents"]["ingestion"]["status"] = "processing"
         agent_start = time.time()
 
-        ingestion_result = run_ingestion(request.content)
+        ingestion_result = run_ingestion(request.content, input_type=request.input_type.value)
 
         pipeline_status[pipeline_id]["agents"]["ingestion"] = {
             "status": "complete",
@@ -225,3 +226,16 @@ async def get_results(pipeline_id: str):
 @app.get("/health")
 async def health():
     return {"status": "ok"}
+
+
+@app.get("/api/cached-result")
+async def get_cached_result():
+    """
+    Returns a pre-cached pipeline result for demo fallback.
+    Used when APIs are slow or down during a live demo.
+    """
+    cache_path = BACKEND_DIR / "sample_data" / "cached_result.json"
+    if not cache_path.exists():
+        raise HTTPException(status_code=404, detail="No cached result available")
+    with open(cache_path, "r") as f:
+        return json.load(f)

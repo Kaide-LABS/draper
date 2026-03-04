@@ -5,6 +5,9 @@ import { useRouter } from "next/navigation";
 import { UploadPanel } from "@/components/upload-panel";
 import { startPipeline } from "@/lib/api";
 
+// Pre-cached result for fallback when APIs are down/slow
+const CACHED_RESULT_URL = "/api/cached-result";
+
 export default function HomePage() {
   const router = useRouter();
   const [isLoading, setIsLoading] = useState(false);
@@ -14,27 +17,38 @@ export default function HomePage() {
     content: string;
     voiceProfile: string;
     founderName: string;
+    inputType: "text" | "audio";
   }) => {
     setIsLoading(true);
     setError(null);
 
     try {
       const { pipeline_id } = await startPipeline({
-        input_type: "text",
+        input_type: data.inputType,
         content: data.content,
         voice_profile: data.voiceProfile,
         founder_name: data.founderName,
       });
 
-      // Store pipeline_id — the pipeline page will poll for status
       sessionStorage.setItem("pipeline_id", pipeline_id);
       sessionStorage.setItem("founder_name", data.founderName);
-
-      // Navigate to pipeline page immediately (don't wait for completion)
       router.push("/pipeline");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Something went wrong");
       setIsLoading(false);
+    }
+  };
+
+  const handleFallback = async () => {
+    try {
+      const res = await fetch(CACHED_RESULT_URL);
+      if (!res.ok) throw new Error("No cached results available");
+      const cachedResult = await res.json();
+      sessionStorage.setItem("pipeline_results", JSON.stringify(cachedResult));
+      sessionStorage.setItem("founder_name", cachedResult.metadata?.founder_name || "Alex Chen");
+      router.push("/review");
+    } catch {
+      setError("Fallback cache not available. Please try the live pipeline.");
     }
   };
 
@@ -57,7 +71,13 @@ export default function HomePage() {
       {/* Error Display */}
       {error && (
         <div className="bg-red-900/20 border border-red-800 rounded-lg p-4 text-red-400 text-sm">
-          {error}
+          <p>{error}</p>
+          <button
+            onClick={handleFallback}
+            className="mt-2 text-xs text-draper-gold hover:text-draper-gold-hover underline"
+          >
+            Use cached demo results instead →
+          </button>
         </div>
       )}
     </div>
