@@ -28,6 +28,7 @@ export default function HomePage() {
 
       // Store pipeline_id — the pipeline page will poll for status
       sessionStorage.setItem("pipeline_id", pipeline_id);
+      sessionStorage.setItem("founder_name", data.founderName);
 
       // Navigate to pipeline page immediately (don't wait for completion)
       router.push("/pipeline");

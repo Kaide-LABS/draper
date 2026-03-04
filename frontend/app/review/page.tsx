@@ -2,11 +2,18 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { PipelineResult } from "@/lib/api";
+import type { PipelineResult } from "@/lib/api";
+import { StatsBar } from "@/components/stats-bar";
+import { DraftPanel } from "@/components/draft-panel";
+import { LinkedInPreview } from "@/components/linkedin-preview";
+import { TwitterPreview } from "@/components/twitter-preview";
+import { NewsletterPreview } from "@/components/newsletter-preview";
+import { QuoteCard } from "@/components/quote-card";
 
 export default function ReviewPage() {
   const router = useRouter();
   const [results, setResults] = useState<PipelineResult | null>(null);
+  const [founderName, setFounderName] = useState("Founder");
 
   useEffect(() => {
     const stored = sessionStorage.getItem("pipeline_results");
@@ -15,6 +22,12 @@ export default function ReviewPage() {
       return;
     }
     setResults(JSON.parse(stored));
+
+    // Try to get founder name from pipeline request (stored by home page)
+    const storedName = sessionStorage.getItem("founder_name");
+    if (storedName) {
+      setFounderName(storedName);
+    }
   }, [router]);
 
   if (!results) {
@@ -28,21 +41,72 @@ export default function ReviewPage() {
     );
   }
 
-  // Phase 3 placeholder — Phase 4 replaces with full review dashboard
   return (
     <div className="space-y-6">
+      {/* Page Header */}
       <div className="text-center space-y-2">
         <h1 className="text-2xl font-bold">Review Dashboard</h1>
         <p className="text-draper-muted text-sm">
-          Generated in {(results.metadata.total_duration_ms / 1000).toFixed(1)}s | Quality: {results.critique_scorecard.overall}/100
+          Review, edit, and approve your authority content
         </p>
       </div>
 
-      <div className="bg-draper-charcoal border border-draper-border rounded-lg p-6 text-sm text-draper-muted">
-        Full review dashboard coming in Phase 4. Results are loaded and ready.
-        <pre className="mt-4 text-xs overflow-auto max-h-[400px]">
-          {JSON.stringify(results, null, 2)}
-        </pre>
+      {/* Stats Bar */}
+      <StatsBar
+        totalDurationMs={results.metadata.total_duration_ms}
+        estimatedCostUsd={results.metadata.estimated_cost_usd}
+        overallScore={results.critique_scorecard.overall}
+        passed={results.critique_scorecard.passed}
+        revisionLoops={results.metadata.revision_loops}
+        inputWordCount={results.metadata.input_word_count}
+        outputWordCount={results.metadata.output_word_count}
+      />
+
+      {/* Two-Panel Layout */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        {/* Left Panel — Draft + Scorecard */}
+        <DraftPanel
+          draft={results.long_form_draft}
+          scorecard={results.critique_scorecard}
+          revisionLoops={results.metadata.revision_loops}
+          founderName={founderName}
+        />
+
+        {/* Right Panel — Platform Asset Previews */}
+        <div className="space-y-4">
+          <LinkedInPreview
+            content={results.assets.linkedin_post}
+            founderName={founderName}
+          />
+
+          <TwitterPreview
+            thread={results.assets.x_thread}
+            founderName={founderName}
+          />
+
+          <NewsletterPreview
+            content={results.assets.newsletter_blurb}
+            founderName={founderName}
+          />
+
+          <QuoteCard
+            quote={results.assets.quote_card_text}
+            founderName={founderName}
+          />
+        </div>
+      </div>
+
+      {/* Back to Home */}
+      <div className="text-center pb-8">
+        <button
+          onClick={() => {
+            sessionStorage.clear();
+            router.push("/");
+          }}
+          className="px-6 py-2 text-sm bg-draper-dark text-draper-muted rounded-lg hover:text-white border border-draper-border"
+        >
+          ← Start New Generation
+        </button>
       </div>
     </div>
   );
