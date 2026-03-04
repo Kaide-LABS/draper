@@ -5,14 +5,16 @@ import { useState } from "react";
 interface NewsletterPreviewProps {
   content: string;
   founderName: string;
+  fullArticle?: string;
   onContentChange?: (newContent: string) => void;
 }
 
-export function NewsletterPreview({ content, founderName, onContentChange }: NewsletterPreviewProps) {
+export function NewsletterPreview({ content, founderName, fullArticle, onContentChange }: NewsletterPreviewProps) {
   const [isEditing, setIsEditing] = useState(false);
   const [editValue, setEditValue] = useState(content);
   const [isApproved, setIsApproved] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [isArticleOpen, setIsArticleOpen] = useState(false);
 
   // Extract a subject line from the first sentence
   const subjectLine = editValue.split(/[.!?]/)[0]?.trim() || "This week's insight";
@@ -34,99 +36,134 @@ export function NewsletterPreview({ content, founderName, onContentChange }: New
   };
 
   return (
-    <div className={`bg-draper-charcoal border rounded-lg overflow-hidden ${isApproved ? "border-green-500/50" : "border-draper-border"}`}>
-      {/* Header — Email branding */}
-      <div className="px-4 pt-3 pb-2 flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <span className="text-xs">📧</span>
-          <span className="text-xs text-draper-muted">Newsletter Blurb</span>
-        </div>
-        {isApproved && <span className="text-xs text-green-400">Approved</span>}
-      </div>
-
-      {/* Email header mock */}
-      <div className="px-4 pb-2 border-b border-draper-border">
-        <div className="space-y-1">
-          <div className="flex items-center gap-2 text-xs">
-            <span className="text-draper-muted w-12">From:</span>
-            <span className="text-draper-text/80">{founderName}</span>
+    <>
+      <div className={`bg-draper-charcoal border rounded-lg overflow-hidden ${isApproved ? "border-green-500/50" : "border-draper-border"}`}>
+        {/* Header — Email branding */}
+        <div className="px-4 pt-3 pb-2 flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <span className="text-xs">📧</span>
+            <span className="text-xs text-draper-muted">Newsletter Blurb</span>
           </div>
-          <div className="flex items-center gap-2 text-xs">
-            <span className="text-draper-muted w-12">Subject:</span>
-            <span className="text-draper-text font-semibold">{subjectLine}</span>
+          {isApproved && <span className="text-xs text-green-400">Approved</span>}
+        </div>
+
+        {/* Email header mock */}
+        <div className="px-4 pb-2 border-b border-draper-border">
+          <div className="space-y-1">
+            <div className="flex items-center gap-2 text-xs">
+              <span className="text-draper-muted w-12">From:</span>
+              <span className="text-draper-text/80">{founderName}</span>
+            </div>
+            <div className="flex items-center gap-2 text-xs">
+              <span className="text-draper-muted w-12">Subject:</span>
+              <span className="text-draper-text font-semibold">{subjectLine}</span>
+            </div>
           </div>
         </div>
-      </div>
 
-      {/* Email body */}
-      <div className="px-4 py-4">
-        {isEditing ? (
-          <textarea
-            value={editValue}
-            onChange={(e) => setEditValue(e.target.value)}
-            className="w-full bg-draper-dark border border-draper-border rounded p-3 text-sm text-draper-text/80 resize-y min-h-[120px] focus:outline-none focus:border-draper-gold"
-            rows={6}
-          />
-        ) : (
-          <div className="text-sm text-draper-text/80 leading-relaxed whitespace-pre-line">
-            {editValue}
+        {/* Email body */}
+        <div className="px-4 py-4">
+          {isEditing ? (
+            <textarea
+              value={editValue}
+              onChange={(e) => setEditValue(e.target.value)}
+              className="w-full bg-draper-dark border border-draper-border rounded p-3 text-sm text-draper-text/80 resize-y min-h-[120px] focus:outline-none focus:border-draper-gold"
+              rows={6}
+            />
+          ) : (
+            <div className="text-sm text-draper-text/80 leading-relaxed whitespace-pre-line">
+              {editValue}
+            </div>
+          )}
+        </div>
+
+        {/* CTA button mock */}
+        {!isEditing && (
+          <div className="px-4 pb-4">
+            <button 
+              onClick={() => fullArticle && setIsArticleOpen(true)}
+              className={`inline-block px-4 py-2 bg-draper-gold/20 text-draper-gold text-xs font-semibold rounded transition-colors ${fullArticle ? 'hover:bg-draper-gold/30 cursor-pointer' : 'cursor-default opacity-50'}`}
+            >
+              Read Full Article →
+            </button>
           </div>
         )}
+
+        {/* Action buttons */}
+        <div className="px-4 py-3 border-t border-draper-border flex items-center gap-2">
+          {isEditing ? (
+            <>
+              <button
+                onClick={handleSave}
+                className="px-3 py-1 text-xs bg-draper-gold text-black font-semibold rounded hover:bg-draper-gold-hover"
+              >
+                Save
+              </button>
+              <button
+                onClick={handleCancel}
+                className="px-3 py-1 text-xs bg-draper-dark text-draper-muted rounded hover:text-draper-text"
+              >
+                Cancel
+              </button>
+            </>
+          ) : (
+            <>
+              <button
+                onClick={() => setIsApproved(!isApproved)}
+                className={`px-3 py-1 text-xs rounded font-semibold ${
+                  isApproved
+                    ? "bg-green-500/20 text-green-400"
+                    : "bg-draper-dark text-draper-muted hover:text-draper-text"
+                }`}
+              >
+                {isApproved ? "✓ Approved" : "Approve"}
+              </button>
+              <button
+                onClick={() => setIsEditing(true)}
+                className="px-3 py-1 text-xs bg-draper-dark text-draper-muted rounded hover:text-draper-text"
+              >
+                Edit
+              </button>
+              <button
+                onClick={handleCopy}
+                className="px-3 py-1 text-xs bg-draper-dark text-draper-muted rounded hover:text-draper-text"
+              >
+                {copied ? "Copied!" : "Copy"}
+              </button>
+            </>
+          )}
+        </div>
       </div>
 
-      {/* CTA button mock */}
-      {!isEditing && (
-        <div className="px-4 pb-4">
-          <div className="inline-block px-4 py-2 bg-draper-gold/20 text-draper-gold text-xs font-semibold rounded cursor-default">
-            Read Full Article →
+      {/* Full Article Modal */}
+      {isArticleOpen && fullArticle && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm">
+          <div className="bg-draper-charcoal border border-draper-border rounded-lg w-full max-w-2xl max-h-[80vh] flex flex-col shadow-2xl animate-in fade-in zoom-in-95 duration-200">
+            <div className="p-4 border-b border-draper-border flex justify-between items-center bg-draper-dark/50">
+              <h3 className="font-semibold text-draper-gold font-serif">Full Article</h3>
+              <button 
+                onClick={() => setIsArticleOpen(false)}
+                className="text-draper-muted hover:text-white p-1"
+              >
+                ✕
+              </button>
+            </div>
+            <div className="p-6 overflow-y-auto prose prose-invert prose-sm max-w-none">
+              {fullArticle.split('\n').map((para, i) => (
+                <p key={i} className="text-draper-text/90 leading-relaxed mb-4">{para}</p>
+              ))}
+            </div>
+            <div className="p-4 border-t border-draper-border flex justify-end bg-draper-dark/50">
+              <button 
+                onClick={() => setIsArticleOpen(false)}
+                className="px-4 py-2 text-sm bg-draper-dark text-draper-muted rounded hover:text-white border border-draper-border"
+              >
+                Close
+              </button>
+            </div>
           </div>
         </div>
       )}
-
-      {/* Action buttons */}
-      <div className="px-4 py-3 border-t border-draper-border flex items-center gap-2">
-        {isEditing ? (
-          <>
-            <button
-              onClick={handleSave}
-              className="px-3 py-1 text-xs bg-draper-gold text-black font-semibold rounded hover:bg-draper-gold-hover"
-            >
-              Save
-            </button>
-            <button
-              onClick={handleCancel}
-              className="px-3 py-1 text-xs bg-draper-dark text-draper-muted rounded hover:text-draper-text"
-            >
-              Cancel
-            </button>
-          </>
-        ) : (
-          <>
-            <button
-              onClick={() => setIsApproved(!isApproved)}
-              className={`px-3 py-1 text-xs rounded font-semibold ${
-                isApproved
-                  ? "bg-green-500/20 text-green-400"
-                  : "bg-draper-dark text-draper-muted hover:text-draper-text"
-              }`}
-            >
-              {isApproved ? "✓ Approved" : "Approve"}
-            </button>
-            <button
-              onClick={() => setIsEditing(true)}
-              className="px-3 py-1 text-xs bg-draper-dark text-draper-muted rounded hover:text-draper-text"
-            >
-              Edit
-            </button>
-            <button
-              onClick={handleCopy}
-              className="px-3 py-1 text-xs bg-draper-dark text-draper-muted rounded hover:text-draper-text"
-            >
-              {copied ? "Copied!" : "Copy"}
-            </button>
-          </>
-        )}
-      </div>
-    </div>
+    </>
   );
 }

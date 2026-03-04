@@ -87,6 +87,7 @@ export default function ReviewPage() {
           <NewsletterPreview
             content={results.assets.newsletter_blurb}
             founderName={founderName}
+            fullArticle={results.long_form_draft}
           />
 
           <QuoteCard

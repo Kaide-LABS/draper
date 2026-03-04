@@ -55,11 +55,53 @@ export function UploadPanel({ onSubmit, isLoading }: UploadPanelProps) {
   const [audioError, setAudioError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // Recording State
+  const [isRecording, setIsRecording] = useState(false);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
+
+  const startRecording = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const mediaRecorder = new MediaRecorder(stream);
+      mediaRecorderRef.current = mediaRecorder;
+      audioChunksRef.current = [];
+
+      mediaRecorder.ondataavailable = (event) => {
+        if (event.data.size > 0) {
+          audioChunksRef.current.push(event.data);
+        }
+      };
+
+      mediaRecorder.onstop = () => {
+        const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
+        // Create a File object so it passes the existing validation logic
+        const file = new File([audioBlob], "recording.webm", { type: 'audio/webm' });
+        validateAndSetFile(file);
+        stream.getTracks().forEach(track => track.stop());
+      };
+
+      mediaRecorder.start();
+      setIsRecording(true);
+      setAudioError(null);
+      setAudioFile(null); // Clear previous file if any
+    } catch (err) {
+      setAudioError("Microphone access denied or unavailable.");
+    }
+  };
+
+  const stopRecording = () => {
+    if (mediaRecorderRef.current && isRecording) {
+      mediaRecorderRef.current.stop();
+      setIsRecording(false);
+    }
+  };
+
   const validateAndSetFile = (file: File) => {
     setAudioError(null);
 
-    if (!ACCEPTED_AUDIO_TYPES.includes(file.type)) {
-      setAudioError("Unsupported format. Use .mp3, .wav, or .m4a");
+    if (!ACCEPTED_AUDIO_TYPES.includes(file.type) && !file.type.includes("audio/")) {
+      setAudioError("Unsupported format. Use .mp3, .wav, .m4a, or record directly.");
       return;
     }
 
@@ -99,6 +141,8 @@ export function UploadPanel({ onSubmit, isLoading }: UploadPanelProps) {
     setVoiceProfile(SAMPLE_DATA.voiceProfile);
     setContent(SAMPLE_DATA.content);
     setAudioFile(null);
+    setAudioError(null);
+    if (isRecording) stopRecording();
   };
 
   const handleSubmit = async () => {
@@ -140,7 +184,10 @@ export function UploadPanel({ onSubmit, isLoading }: UploadPanelProps) {
         <Label className="text-sm text-draper-muted">Input Method</Label>
         <div className="flex gap-2">
           <button
-            onClick={() => setInputMode("text")}
+            onClick={() => {
+              setInputMode("text");
+              if (isRecording) stopRecording();
+            }}
             className={`px-4 py-2 text-sm rounded-lg border transition-colors ${
               inputMode === "text"
                 ? "bg-draper-gold/20 border-draper-gold text-draper-gold"
@@ -182,30 +229,61 @@ export function UploadPanel({ onSubmit, isLoading }: UploadPanelProps) {
         </div>
       )}
 
-      {/* Audio Input — Drag & Drop Zone */}
+      {/* Audio Input — Drag & Drop Zone + Recorder */}
       {inputMode === "audio" && (
-        <div className="space-y-2">
-          <Label className="text-sm text-draper-muted">Audio Recording</Label>
+        <div className="space-y-4">
+          <div className="flex items-center justify-between">
+            <Label className="text-sm text-draper-muted">Audio Recording</Label>
+            {isRecording ? (
+              <Button 
+                onClick={stopRecording} 
+                variant="destructive" 
+                size="sm"
+                className="h-8 animate-pulse"
+              >
+                ⏹ Stop Recording
+              </Button>
+            ) : (
+              <Button 
+                onClick={startRecording} 
+                variant="outline" 
+                size="sm"
+                className="h-8 border-draper-border bg-draper-dark text-draper-muted hover:text-white"
+              >
+                🎙️ Record Browser Audio
+              </Button>
+            )}
+          </div>
+
           <div
             onDragOver={handleDragOver}
             onDragLeave={handleDragLeave}
             onDrop={handleDrop}
-            onClick={() => fileInputRef.current?.click()}
-            className={`border-2 border-dashed rounded-lg p-8 text-center cursor-pointer transition-colors ${
+            onClick={() => {
+              if (!isRecording) fileInputRef.current?.click();
+            }}
+            className={`border-2 border-dashed rounded-lg p-8 text-center transition-colors ${
+              isRecording ? "border-red-500/50 bg-red-900/10 cursor-default" :
               isDragging
-                ? "border-draper-gold bg-draper-gold/5"
+                ? "border-draper-gold bg-draper-gold/5 cursor-pointer"
                 : audioFile
-                ? "border-green-500/50 bg-green-900/10"
-                : "border-draper-border hover:border-draper-muted"
+                ? "border-green-500/50 bg-green-900/10 cursor-pointer"
+                : "border-draper-border hover:border-draper-muted cursor-pointer"
             }`}
           >
-            {audioFile ? (
+            {isRecording ? (
+              <div className="space-y-2">
+                <p className="text-2xl animate-pulse">🎙️</p>
+                <p className="text-sm text-red-400">Recording in progress...</p>
+                <p className="text-xs text-draper-muted">Speak your thoughts out loud.</p>
+              </div>
+            ) : audioFile ? (
               <div className="space-y-2">
                 <p className="text-sm text-green-400">
                   {audioFile.name}
                 </p>
                 <p className="text-xs text-draper-muted">
-                  {(audioFile.size / (1024 * 1024)).toFixed(1)} MB
+                  {(audioFile.size / (1024 * 1024)).toFixed(2)} MB
                 </p>
                 <button
                   onClick={(e) => {
@@ -219,7 +297,7 @@ export function UploadPanel({ onSubmit, isLoading }: UploadPanelProps) {
               </div>
             ) : (
               <div className="space-y-2">
-                <p className="text-2xl">🎙️</p>
+                <p className="text-2xl">📁</p>
                 <p className="text-sm text-draper-muted">
                   Drag & drop an audio file, or click to browse
                 </p>
@@ -232,7 +310,7 @@ export function UploadPanel({ onSubmit, isLoading }: UploadPanelProps) {
           <input
             ref={fileInputRef}
             type="file"
-            accept=".mp3,.wav,.m4a"
+            accept=".mp3,.wav,.m4a,.webm"
             onChange={handleFileSelect}
             className="hidden"
           />
@@ -266,7 +344,8 @@ export function UploadPanel({ onSubmit, isLoading }: UploadPanelProps) {
           disabled={
             (inputMode === "text" && !content.trim()) ||
             (inputMode === "audio" && !audioFile) ||
-            isLoading
+            isLoading ||
+            isRecording
           }
           className="w-full bg-draper-gold text-draper-black font-semibold hover:bg-draper-gold-hover disabled:opacity-40 disabled:cursor-not-allowed h-12 text-sm uppercase tracking-widest"
         >
@@ -275,7 +354,7 @@ export function UploadPanel({ onSubmit, isLoading }: UploadPanelProps) {
 
         <button
           onClick={handleTryExample}
-          disabled={isLoading}
+          disabled={isLoading || isRecording}
           className="w-full text-sm text-draper-muted hover:text-draper-gold transition-colors disabled:opacity-40"
         >
           or try a sample brain-dump →

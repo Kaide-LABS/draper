@@ -11,10 +11,20 @@ export default function PipelinePage() {
   const router = useRouter();
   const [status, setStatus] = useState<PipelineStatus | null>(null);
   const [error, setError] = useState<string | null>(null);
+  
+  // Use state for pipelineId and mounting to avoid hydration mismatches
+  const [pipelineId, setPipelineId] = useState<string | null>(null);
+  const [isMounted, setIsMounted] = useState(false);
 
-  const pipelineId = typeof window !== "undefined"
-    ? sessionStorage.getItem("pipeline_id")
-    : null;
+  useEffect(() => {
+    setIsMounted(true);
+    const id = sessionStorage.getItem("pipeline_id");
+    if (!id) {
+      router.push("/");
+      return;
+    }
+    setPipelineId(id);
+  }, [router]);
 
   const pollStatus = useCallback(async () => {
     if (!pipelineId) return;
@@ -41,20 +51,25 @@ export default function PipelinePage() {
   }, [pipelineId, router]);
 
   useEffect(() => {
-    if (!pipelineId) {
-      router.push("/");
-      return;
-    }
+    if (!pipelineId) return;
 
     // Poll every 1.5 seconds
     pollStatus(); // immediate first call
     const interval = setInterval(pollStatus, 1500);
 
     return () => clearInterval(interval);
-  }, [pipelineId, pollStatus, router]);
+  }, [pipelineId, pollStatus]);
 
-  if (!pipelineId) {
-    return null; // redirecting to home
+  // Show nothing during SSR or if no pipeline ID (it will redirect)
+  if (!isMounted || !pipelineId) {
+    return (
+      <div className="flex items-center justify-center min-h-[400px]">
+        <div className="text-center space-y-4">
+          <div className="w-8 h-8 border-2 border-draper-gold border-t-transparent rounded-full animate-spin mx-auto" />
+          <p className="text-draper-muted">Initializing...</p>
+        </div>
+      </div>
+    );
   }
 
   return (
