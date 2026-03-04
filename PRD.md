@@ -1208,34 +1208,700 @@ curl http://localhost:8000/api/pipeline/<uuid-from-step-3>/results
 
 ---
 
-### Phase 2: Frontend Scaffold + Upload Page
-**Goal:** Next.js app running with dark theme, Upload page functional, wired to backend.
+### Phase 2: Frontend Scaffold + Upload Page — DETAILED IMPLEMENTATION SPEC
 
-**What gets built:**
-- Next.js 14 app with App Router (`frontend/`)
-- Tailwind CSS + shadcn/ui installed and configured
-- Dark theme global layout (black `#0A0A0A`, charcoal `#1A1A1A`, white text, gold accent `#C9A84C`)
-- Upload page (`/`) — textarea for raw text input, voice profile input field, "Generate Authority Content" button
-- API client lib (`frontend/lib/api.ts`) that calls FastAPI backend
-- Basic routing: submit on `/` → redirect to `/pipeline`
-- CORS configured between Next.js (port 3000) and FastAPI (port 8000)
+**Goal:** Next.js app running with dark theme, Upload page functional, wired to backend. User pastes text, clicks Generate, request hits FastAPI and returns results.
 
 **What's NOT in Phase 2:**
-- No pipeline visualization yet (just a loading/waiting state)
+- No pipeline visualization yet (redirect to `/pipeline` shows a simple "Processing..." state)
 - No review dashboard yet
-- No audio upload yet
+- No audio upload yet (Phase 5)
 
-**Key files:**
-| File | Purpose |
-|------|---------|
-| `frontend/app/layout.tsx` | Root layout, dark theme, Inter font, global styles |
-| `frontend/app/page.tsx` | Upload / landing page |
-| `frontend/components/upload-panel.tsx` | Text input, voice profile, submit button |
-| `frontend/lib/api.ts` | Fetch wrapper for FastAPI endpoints |
-| `frontend/tailwind.config.ts` | Custom color palette, typography |
-| `frontend/package.json` | Dependencies |
+---
 
-**Verification:** Open browser at `localhost:3000`, paste sample text, click Generate → request reaches FastAPI backend and returns results (console-logged or displayed raw).
+#### Phase 2.1: Project Initialization
+
+**Run these commands from the project root (`/draper`):**
+
+```bash
+# Create Next.js 14 app with App Router, TypeScript, Tailwind, ESLint
+npx create-next-app@latest frontend \
+  --typescript \
+  --tailwind \
+  --eslint \
+  --app \
+  --src-dir=false \
+  --import-alias="@/*" \
+  --use-npm
+
+cd frontend
+
+# Install shadcn/ui
+npx shadcn@latest init -d
+
+# Add required shadcn components
+npx shadcn@latest add button textarea input label card badge
+```
+
+**After init, the `frontend/` directory should look like:**
+```
+frontend/
+├── app/
+│   ├── globals.css
+│   ├── layout.tsx
+│   ├── page.tsx
+│   └── pipeline/
+│       └── page.tsx
+├── components/
+│   ├── ui/               # shadcn components (auto-generated)
+│   │   ├── button.tsx
+│   │   ├── textarea.tsx
+│   │   ├── input.tsx
+│   │   ├── label.tsx
+│   │   ├── card.tsx
+│   │   └── badge.tsx
+│   └── upload-panel.tsx   # custom component
+├── lib/
+│   ├── utils.ts           # shadcn utility (auto-generated)
+│   └── api.ts             # API client for FastAPI
+├── components.json        # shadcn config
+├── tailwind.config.ts
+├── tsconfig.json
+├── next.config.mjs
+└── package.json
+```
+
+---
+
+#### Phase 2.2: Tailwind Configuration
+
+**`frontend/tailwind.config.ts`** — extend the default shadcn config with the Draper design tokens:
+
+```typescript
+import type { Config } from "tailwindcss";
+
+const config: Config = {
+  darkMode: ["class"],
+  content: [
+    "./pages/**/*.{ts,tsx}",
+    "./components/**/*.{ts,tsx}",
+    "./app/**/*.{ts,tsx}",
+    "./src/**/*.{ts,tsx}",
+  ],
+  theme: {
+    extend: {
+      colors: {
+        // Draper brand palette
+        draper: {
+          black: "#0A0A0A",
+          charcoal: "#1A1A1A",
+          dark: "#111111",
+          border: "#2A2A2A",
+          muted: "#888888",
+          gold: "#C9A84C",
+          "gold-hover": "#D4B85C",
+        },
+        // Override shadcn defaults for dark theme
+        background: "#0A0A0A",
+        foreground: "#FFFFFF",
+        card: {
+          DEFAULT: "#1A1A1A",
+          foreground: "#FFFFFF",
+        },
+        muted: {
+          DEFAULT: "#2A2A2A",
+          foreground: "#888888",
+        },
+        accent: {
+          DEFAULT: "#C9A84C",
+          foreground: "#0A0A0A",
+        },
+        border: "#2A2A2A",
+        input: "#2A2A2A",
+        ring: "#C9A84C",
+      },
+      fontFamily: {
+        sans: ["Inter", "system-ui", "sans-serif"],
+        serif: ["Playfair Display", "Georgia", "serif"],
+      },
+      borderRadius: {
+        lg: "0.75rem",
+        md: "0.5rem",
+        sm: "0.25rem",
+      },
+    },
+  },
+  plugins: [require("tailwindcss-animate")],
+};
+
+export default config;
+```
+
+---
+
+#### Phase 2.3: Global Styles
+
+**`frontend/app/globals.css`** — replace the default contents entirely:
+
+```css
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Playfair+Display:wght@700&display=swap');
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-draper-black text-white font-sans antialiased;
+  }
+}
+```
+
+---
+
+#### Phase 2.4: Root Layout
+
+**`frontend/app/layout.tsx`:**
+
+```tsx
+import type { Metadata } from "next";
+import "./globals.css";
+
+export const metadata: Metadata = {
+  title: "Draper AI Authority Engine",
+  description: "Transform founder thinking into multi-platform authority content",
+};
+
+export default function RootLayout({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
+  return (
+    <html lang="en" className="dark">
+      <body>
+        <div className="min-h-screen bg-draper-black">
+          {/* Header */}
+          <header className="border-b border-draper-border px-6 py-4">
+            <div className="max-w-5xl mx-auto flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="w-8 h-8 bg-draper-gold rounded-md flex items-center justify-center">
+                  <span className="text-draper-black font-bold text-sm">D</span>
+                </div>
+                <span className="text-lg font-semibold tracking-tight">
+                  Draper AI Engine
+                </span>
+              </div>
+              <span className="text-xs text-draper-muted">v0.1 Demo</span>
+            </div>
+          </header>
+
+          {/* Main content */}
+          <main className="max-w-5xl mx-auto px-6 py-10">
+            {children}
+          </main>
+        </div>
+      </body>
+    </html>
+  );
+}
+```
+
+---
+
+#### Phase 2.5: API Client
+
+**`frontend/lib/api.ts`:**
+
+```typescript
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+
+export interface PipelineRequest {
+  input_type: "text" | "audio";
+  content: string;
+  voice_profile: string;
+  founder_name: string;
+}
+
+export interface PipelineStartResponse {
+  pipeline_id: string;
+  status: string;
+}
+
+export interface CritiqueScore {
+  ai_detection_risk: number;
+  readability: number;
+  contrarian_strength: number;
+  voice_authenticity: number;
+  hook_power: number;
+  actionable_density: number;
+  overall: number;
+  passed: boolean;
+  revision_notes: string;
+}
+
+export interface CascadeOutput {
+  linkedin_post: string;
+  x_thread: string[];
+  newsletter_blurb: string;
+  quote_card_text: string;
+}
+
+export interface PipelineResult {
+  pipeline_id: string;
+  long_form_draft: string;
+  critique_scorecard: CritiqueScore;
+  assets: CascadeOutput;
+  metadata: {
+    total_duration_ms: number;
+    estimated_cost_usd: number;
+    revision_loops: number;
+    input_word_count: number;
+    output_word_count: number;
+  };
+}
+
+export async function startPipeline(
+  request: PipelineRequest
+): Promise<PipelineStartResponse> {
+  const res = await fetch(`${API_BASE}/api/pipeline/start`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(request),
+  });
+
+  if (!res.ok) {
+    const error = await res.json().catch(() => ({ detail: "Unknown error" }));
+    throw new Error(error.detail || `Pipeline failed: ${res.status}`);
+  }
+
+  return res.json();
+}
+
+export async function getPipelineResults(
+  pipelineId: string
+): Promise<PipelineResult> {
+  const res = await fetch(`${API_BASE}/api/pipeline/${pipelineId}/results`);
+
+  if (!res.ok) {
+    const error = await res.json().catch(() => ({ detail: "Unknown error" }));
+    throw new Error(error.detail || `Failed to get results: ${res.status}`);
+  }
+
+  return res.json();
+}
+```
+
+---
+
+#### Phase 2.6: Upload Panel Component
+
+**`frontend/components/upload-panel.tsx`:**
+
+```tsx
+"use client";
+
+import { useState } from "react";
+import { Button } from "@/components/ui/button";
+import { Textarea } from "@/components/ui/textarea";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Card } from "@/components/ui/card";
+
+interface UploadPanelProps {
+  onSubmit: (data: {
+    content: string;
+    voiceProfile: string;
+    founderName: string;
+  }) => void;
+  isLoading: boolean;
+}
+
+export function UploadPanel({ onSubmit, isLoading }: UploadPanelProps) {
+  const [content, setContent] = useState("");
+  const [voiceProfile, setVoiceProfile] = useState(
+    "direct, technical, contrarian"
+  );
+  const [founderName, setFounderName] = useState("");
+
+  const handleSubmit = () => {
+    if (!content.trim()) return;
+    onSubmit({
+      content: content.trim(),
+      voiceProfile,
+      founderName: founderName.trim() || "Founder",
+    });
+  };
+
+  return (
+    <Card className="bg-draper-charcoal border-draper-border p-6 space-y-6">
+      {/* Founder Name */}
+      <div className="space-y-2">
+        <Label htmlFor="founder-name" className="text-sm text-draper-muted">
+          Founder Name
+        </Label>
+        <Input
+          id="founder-name"
+          placeholder="e.g., Alex Chen"
+          value={founderName}
+          onChange={(e) => setFounderName(e.target.value)}
+          className="bg-draper-dark border-draper-border text-white placeholder:text-draper-muted/50"
+        />
+      </div>
+
+      {/* Raw Content */}
+      <div className="space-y-2">
+        <Label htmlFor="content" className="text-sm text-draper-muted">
+          Raw Founder Brain-Dump
+        </Label>
+        <Textarea
+          id="content"
+          placeholder="Paste the founder's raw, unfiltered thoughts here... The messier the better. We'll extract the gold."
+          value={content}
+          onChange={(e) => setContent(e.target.value)}
+          rows={10}
+          className="bg-draper-dark border-draper-border text-white placeholder:text-draper-muted/50 resize-y min-h-[200px]"
+        />
+        <p className="text-xs text-draper-muted">
+          {content.split(/\s+/).filter(Boolean).length} words
+        </p>
+      </div>
+
+      {/* Voice Profile */}
+      <div className="space-y-2">
+        <Label htmlFor="voice-profile" className="text-sm text-draper-muted">
+          Voice Profile
+        </Label>
+        <Input
+          id="voice-profile"
+          placeholder="e.g., direct, technical, contrarian"
+          value={voiceProfile}
+          onChange={(e) => setVoiceProfile(e.target.value)}
+          className="bg-draper-dark border-draper-border text-white placeholder:text-draper-muted/50"
+        />
+        <p className="text-xs text-draper-muted">
+          Describe the founder&apos;s tone in 3-5 words
+        </p>
+      </div>
+
+      {/* Submit */}
+      <Button
+        onClick={handleSubmit}
+        disabled={!content.trim() || isLoading}
+        className="w-full bg-draper-gold text-draper-black font-semibold hover:bg-draper-gold-hover disabled:opacity-40 disabled:cursor-not-allowed h-12 text-base"
+      >
+        {isLoading ? "Generating..." : "Generate Authority Content"}
+      </Button>
+    </Card>
+  );
+}
+```
+
+---
+
+#### Phase 2.7: Upload Page (Home)
+
+**`frontend/app/page.tsx`:**
+
+```tsx
+"use client";
+
+import { useState } from "react";
+import { useRouter } from "next/navigation";
+import { UploadPanel } from "@/components/upload-panel";
+import { startPipeline, getPipelineResults, PipelineResult } from "@/lib/api";
+
+export default function HomePage() {
+  const router = useRouter();
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const handleSubmit = async (data: {
+    content: string;
+    voiceProfile: string;
+    founderName: string;
+  }) => {
+    setIsLoading(true);
+    setError(null);
+
+    try {
+      // Start the pipeline
+      const { pipeline_id } = await startPipeline({
+        input_type: "text",
+        content: data.content,
+        voice_profile: data.voiceProfile,
+        founder_name: data.founderName,
+      });
+
+      // For Phase 2: pipeline runs synchronously, so results are ready immediately
+      // Phase 3 will switch to async with polling
+      const results = await getPipelineResults(pipeline_id);
+
+      // Store results in sessionStorage for the pipeline/review pages to read
+      sessionStorage.setItem("pipeline_results", JSON.stringify(results));
+      sessionStorage.setItem("pipeline_id", pipeline_id);
+
+      // Navigate to pipeline page
+      router.push("/pipeline");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Something went wrong");
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  return (
+    <div className="space-y-8">
+      {/* Hero */}
+      <div className="text-center space-y-3">
+        <h1 className="text-3xl font-bold tracking-tight">
+          Authority Engine
+        </h1>
+        <p className="text-draper-muted max-w-xl mx-auto">
+          Paste a founder&apos;s raw thinking. Get publication-ready content for
+          LinkedIn, X, newsletter, and more — in seconds, not hours.
+        </p>
+      </div>
+
+      {/* Upload Panel */}
+      <UploadPanel onSubmit={handleSubmit} isLoading={isLoading} />
+
+      {/* Error Display */}
+      {error && (
+        <div className="bg-red-900/20 border border-red-800 rounded-lg p-4 text-red-400 text-sm">
+          {error}
+        </div>
+      )}
+    </div>
+  );
+}
+```
+
+---
+
+#### Phase 2.8: Pipeline Page (Placeholder)
+
+**`frontend/app/pipeline/page.tsx`:**
+
+This is a minimal placeholder for Phase 2. Phase 3 will replace it with the full visualization.
+
+```tsx
+"use client";
+
+import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
+import { PipelineResult } from "@/lib/api";
+
+export default function PipelinePage() {
+  const router = useRouter();
+  const [results, setResults] = useState<PipelineResult | null>(null);
+
+  useEffect(() => {
+    // Read results from sessionStorage (set by home page after pipeline completes)
+    const stored = sessionStorage.getItem("pipeline_results");
+    if (!stored) {
+      // No results — redirect back to home
+      router.push("/");
+      return;
+    }
+    setResults(JSON.parse(stored));
+  }, [router]);
+
+  if (!results) {
+    return (
+      <div className="flex items-center justify-center min-h-[400px]">
+        <div className="text-center space-y-4">
+          <div className="w-8 h-8 border-2 border-draper-gold border-t-transparent rounded-full animate-spin mx-auto" />
+          <p className="text-draper-muted">Loading results...</p>
+        </div>
+      </div>
+    );
+  }
+
+  // Phase 2: Simple raw output display (Phase 3 replaces with real visualization)
+  return (
+    <div className="space-y-8">
+      <div className="text-center space-y-2">
+        <h1 className="text-2xl font-bold">Pipeline Complete</h1>
+        <p className="text-draper-muted text-sm">
+          Generated in {(results.metadata.total_duration_ms / 1000).toFixed(1)}s
+          {" | "}
+          {results.metadata.revision_loops} revision
+          {results.metadata.revision_loops !== 1 ? "s" : ""}
+          {" | "}
+          Quality: {results.critique_scorecard.overall}/100
+        </p>
+      </div>
+
+      {/* Long-form draft */}
+      <div className="space-y-3">
+        <h2 className="text-lg font-semibold text-draper-gold">
+          Long-Form Draft
+        </h2>
+        <div className="bg-draper-charcoal border border-draper-border rounded-lg p-6 whitespace-pre-wrap text-sm leading-relaxed">
+          {results.long_form_draft}
+        </div>
+      </div>
+
+      {/* Critique Scorecard */}
+      <div className="space-y-3">
+        <h2 className="text-lg font-semibold text-draper-gold">
+          Quality Scorecard
+        </h2>
+        <div className="bg-draper-charcoal border border-draper-border rounded-lg p-6 grid grid-cols-2 gap-4 text-sm">
+          <div>
+            AI Detection Risk:{" "}
+            <span className="font-mono">{results.critique_scorecard.ai_detection_risk}%</span>
+          </div>
+          <div>
+            Readability:{" "}
+            <span className="font-mono">{results.critique_scorecard.readability}/100</span>
+          </div>
+          <div>
+            Contrarian Strength:{" "}
+            <span className="font-mono">{results.critique_scorecard.contrarian_strength}/10</span>
+          </div>
+          <div>
+            Voice Authenticity:{" "}
+            <span className="font-mono">{results.critique_scorecard.voice_authenticity}/10</span>
+          </div>
+          <div>
+            Hook Power:{" "}
+            <span className="font-mono">{results.critique_scorecard.hook_power}/10</span>
+          </div>
+          <div>
+            Actionable Density:{" "}
+            <span className="font-mono">{results.critique_scorecard.actionable_density}/10</span>
+          </div>
+        </div>
+      </div>
+
+      {/* Cascade Assets */}
+      <div className="space-y-3">
+        <h2 className="text-lg font-semibold text-draper-gold">
+          Platform Assets
+        </h2>
+        <div className="grid gap-4">
+          {/* LinkedIn */}
+          <div className="bg-draper-charcoal border border-draper-border rounded-lg p-6 space-y-2">
+            <h3 className="text-sm font-semibold text-draper-muted uppercase tracking-wider">
+              LinkedIn Post
+            </h3>
+            <p className="whitespace-pre-wrap text-sm">
+              {results.assets.linkedin_post}
+            </p>
+          </div>
+
+          {/* X Thread */}
+          <div className="bg-draper-charcoal border border-draper-border rounded-lg p-6 space-y-2">
+            <h3 className="text-sm font-semibold text-draper-muted uppercase tracking-wider">
+              X Thread ({results.assets.x_thread.length} tweets)
+            </h3>
+            <div className="space-y-3">
+              {results.assets.x_thread.map((tweet, i) => (
+                <div key={i} className="text-sm pl-4 border-l-2 border-draper-border">
+                  <span className="text-draper-muted text-xs">
+                    {i + 1}/{results.assets.x_thread.length}
+                  </span>
+                  <p>{tweet}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Newsletter */}
+          <div className="bg-draper-charcoal border border-draper-border rounded-lg p-6 space-y-2">
+            <h3 className="text-sm font-semibold text-draper-muted uppercase tracking-wider">
+              Newsletter Blurb
+            </h3>
+            <p className="whitespace-pre-wrap text-sm">
+              {results.assets.newsletter_blurb}
+            </p>
+          </div>
+
+          {/* Quote Card */}
+          <div className="bg-draper-charcoal border border-draper-border rounded-lg p-6 space-y-2">
+            <h3 className="text-sm font-semibold text-draper-muted uppercase tracking-wider">
+              Quote Card
+            </h3>
+            <blockquote className="text-xl font-serif italic text-draper-gold border-l-4 border-draper-gold pl-4">
+              {results.assets.quote_card_text}
+            </blockquote>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+```
+
+---
+
+#### Phase 2.9: Environment Variable
+
+**`frontend/.env.local`** (create this file — NOT committed to git):
+```
+NEXT_PUBLIC_API_URL=http://localhost:8000
+```
+
+Add to `frontend/.gitignore` (should already be there from create-next-app, but verify):
+```
+.env.local
+```
+
+---
+
+#### Phase 2.10: Verification
+
+**How to test Phase 2 is complete:**
+
+1. **Start the backend (from project root):**
+```bash
+cd backend
+pip install -r requirements.txt
+uvicorn main:app --reload --port 8000
+```
+
+2. **Start the frontend (separate terminal):**
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+3. **Open browser:** Navigate to `http://localhost:3000`
+
+4. **Verify the UI:**
+   - Page has dark background (#0A0A0A)
+   - Header shows "Draper AI Engine" with gold "D" logo box
+   - Three input fields: Founder Name, Raw Brain-Dump textarea, Voice Profile
+   - Word count updates as you type in the textarea
+   - "Generate Authority Content" button is gold (#C9A84C)
+   - Button is disabled when textarea is empty
+
+5. **Test the flow:**
+   - Enter "Alex Chen" as founder name
+   - Paste the sample brain-dump from Section 8 of this PRD
+   - Leave voice profile as "direct, technical, contrarian"
+   - Click "Generate Authority Content"
+   - Button should show "Generating..." with disabled state
+   - After pipeline completes (30-60 seconds), should redirect to `/pipeline`
+   - Pipeline page should display: long-form draft, critique scorecard, and all 4 platform assets
+
+6. **Test error handling:**
+   - Stop the backend server
+   - Try submitting — should show red error banner, NOT a blank screen or crash
+
+**Phase 2 is DONE when:**
+- Dark-mode dashboard renders with Draper branding
+- Upload form submits to FastAPI backend successfully
+- Results display on `/pipeline` page after redirect
+- Error state shows gracefully when backend is down
+- No console errors in browser dev tools
 
 ---
 
