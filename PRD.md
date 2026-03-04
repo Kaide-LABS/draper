@@ -3684,33 +3684,924 @@ This is the only change to `page.tsx`. Everything else stays the same from Phase
 
 ---
 
-### Phase 5: Polish + Demo Prep
+### Phase 5: Polish + Demo Prep — Full Implementation Spec
+
 **Goal:** Bulletproof for a live pitch meeting. Zero rough edges. Runs flawlessly every time.
 
 **What gets built:**
 - **Audio support:** Whisper API integration — drag-and-drop `.mp3`/`.wav`/`.m4a` on upload page
-- **Pre-loaded sample data:** "Try an example" button on upload page that fills in the sample founder brain-dump
-- **Loading states everywhere:** Skeleton screens, progress indicators, "Generating..." states
-- **Error boundaries:** Graceful fallback UI if any agent fails (not a blank screen or crash)
-- **Fallback cache:** One pre-cached complete result set — if OpenAI API is slow/down, demo can still run
-- **Responsive polish:** Ensure dashboard looks good on 1440px laptop screen and when projected
-- **Prompt tuning:** Final pass on all 4 agent system prompts to ensure outputs are genuinely impressive
-- **README.md:** Setup instructions (clone, install, add API key, run both servers)
-- **End-to-end stress test:** Run full flow 3+ times with different inputs, fix any flakiness
+- **Pre-loaded sample data:** "Try an example" button on upload page that fills in a sample founder brain-dump
+- **Error boundaries:** Graceful fallback UI on pipeline page if any agent fails
+- **Fallback cache:** One pre-cached complete result set stored as JSON — if API is slow/down during demo, skip straight to review
+- **README.md:** Setup instructions (clone, install, add API keys, run both servers)
 
 **What's NOT in Phase 5:**
 - No deployment (demo runs on localhost — deploy only if explicitly requested)
 - No CI/CD pipeline (demo project, not production)
+- No prompt tuning (prompts are working — tuning happens live after first real run)
 
 **Key files:**
 | File | Purpose |
 |------|---------|
 | `frontend/components/upload-panel.tsx` | Updated with audio drag-drop + "Try example" button |
-| `backend/agents/ingestion.py` | Updated with Whisper API transcription |
-| `backend/prompts/*.txt` | Final tuned versions of all system prompts |
+| `backend/agents/ingestion.py` | Updated with Whisper audio transcription |
+| `backend/config.py` | Add WHISPER_MODEL constant |
+| `backend/main.py` | Add `/api/pipeline/start` multipart form support for audio files |
+| `frontend/lib/api.ts` | Update `startPipeline` to support file uploads |
+| `frontend/app/page.tsx` | Add "Try an example" button + fallback cache logic |
+| `frontend/components/error-boundary.tsx` | Error boundary wrapper component |
+| `frontend/app/pipeline/page.tsx` | Add error boundary + retry button |
+| `backend/sample_data/cached_result.json` | Pre-cached result for fallback demo |
 | `README.md` | Setup and run instructions |
 
-**Verification:** Demo runs flawlessly 3 out of 3 times end-to-end. Both text and audio input work. A non-technical person can follow the flow and be impressed. No loading state lasts longer than the narrative allows.
+**Verification:** Demo runs flawlessly 3 out of 3 times end-to-end. Both text and audio input work. "Try an example" fills sample data. Fallback cache works if API is down. A non-technical person can follow the flow and be impressed.
+
+---
+
+#### Phase 5: Complete File Specifications
+
+---
+
+##### Feature 1: Whisper Audio Transcription
+
+###### File: `backend/config.py` (UPDATE — add Whisper model)
+
+Add one line after the `CASCADE_MODEL` line:
+
+```python
+# ADD after CASCADE_MODEL line:
+WHISPER_MODEL = "whisper-1"
+```
+
+Full file after update:
+
+```python
+import os
+from pathlib import Path
+from dotenv import load_dotenv
+
+load_dotenv()
+
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
+
+# Model assignments
+EXTRACTION_MODEL = "gemini-3-pro"         # Google — deep reasoning
+SYNTHESIS_MODEL = "gpt-5.2"               # OpenAI — creative writing
+CRITIQUE_MODEL = "gemini-3-flash"         # Google — fast evaluation
+CASCADE_MODEL = "gpt-4o-mini"             # OpenAI — fast formatting
+WHISPER_MODEL = "whisper-1"               # OpenAI — audio transcription
+
+# Base paths
+BACKEND_DIR = Path(__file__).parent
+PROMPTS_DIR = BACKEND_DIR / "prompts"
+```
+
+---
+
+###### File: `backend/agents/ingestion.py` (UPDATE — add Whisper support)
+
+**What changes:** Add a `transcribe_audio` function that takes base64-encoded audio, decodes it to a temp file, sends it to Whisper, and returns the transcript text. Update `run_ingestion` to accept an `input_type` parameter and branch accordingly.
+
+```python
+import re
+import base64
+import tempfile
+from openai import OpenAI
+from config import OPENAI_API_KEY, WHISPER_MODEL
+from models.schemas import IngestionOutput
+
+
+client = OpenAI(api_key=OPENAI_API_KEY)
+
+FILLER_WORDS = [
+    r'\bum\b', r'\buh\b', r'\byou know\b', r'\blike\b(?=\s*,)',
+    r'\bbasically\b', r'\bliterally\b', r'\bactually\b',
+    r'\bso\b(?=\s*,)', r'\bright\b(?=\s*,)'
+]
+
+
+def transcribe_audio(audio_base64: str) -> str:
+    """
+    Decodes base64 audio, writes to a temp file, sends to Whisper API.
+    Returns raw transcript text.
+    """
+    audio_bytes = base64.b64decode(audio_base64)
+
+    # Write to temp file — Whisper needs a file with a proper extension
+    with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as tmp:
+        tmp.write(audio_bytes)
+        tmp_path = tmp.name
+
+    with open(tmp_path, "rb") as audio_file:
+        transcript = client.audio.transcriptions.create(
+            model=WHISPER_MODEL,
+            file=audio_file,
+            response_format="text"
+        )
+
+    return transcript
+
+
+def clean_text(text: str) -> str:
+    """Remove filler words and normalize whitespace."""
+    for pattern in FILLER_WORDS:
+        text = re.sub(pattern, '', text, flags=re.IGNORECASE)
+
+    text = re.sub(r' +', ' ', text)
+    text = re.sub(r'\n{3,}', '\n\n', text)
+    return text.strip()
+
+
+def run_ingestion(raw_text: str, input_type: str = "text") -> IngestionOutput:
+    """
+    Phase 5: Supports both text and audio input.
+
+    For text: cleans raw text (filler words, whitespace normalization).
+    For audio: decodes base64, transcribes via Whisper, then cleans.
+
+    Steps:
+    1. If audio: decode base64, transcribe with Whisper API
+    2. If text: use raw_text directly
+    3. Clean transcript (filler words, whitespace)
+    4. Return clean transcript with word count
+    """
+    if input_type == "audio":
+        raw_transcript = transcribe_audio(raw_text)
+    else:
+        raw_transcript = raw_text
+
+    clean = clean_text(raw_transcript)
+
+    return IngestionOutput(
+        transcript=clean,
+        word_count=len(clean.split()),
+        input_type=input_type
+    )
+```
+
+---
+
+###### File: `backend/main.py` (UPDATE — pass input_type to ingestion)
+
+**One small change in `run_pipeline_async`.** Find this line:
+
+```python
+ingestion_result = run_ingestion(request.content)
+```
+
+Replace with:
+
+```python
+ingestion_result = run_ingestion(request.content, input_type=request.input_type.value)
+```
+
+This passes the `input_type` ("text" or "audio") so ingestion knows whether to run Whisper. No other backend changes needed — the `PipelineRequest` schema already has `input_type` and `content` fields that support both text and base64 audio.
+
+---
+
+###### File: `frontend/lib/api.ts` (UPDATE — support audio file upload)
+
+**Add a new function** `uploadAudioAndStartPipeline` that converts a File to base64, then calls the existing `startPipeline` with `input_type: "audio"`. Add this after the existing `startPipeline` function:
+
+```typescript
+// ADD this new function after startPipeline:
+
+export async function fileToBase64(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = reader.result as string;
+      // Strip the data:audio/...;base64, prefix
+      const base64 = result.split(",")[1];
+      resolve(base64);
+    };
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+```
+
+The upload panel will call `fileToBase64(file)` then pass the result as `content` with `input_type: "audio"` to the existing `startPipeline`.
+
+---
+
+###### File: `frontend/components/upload-panel.tsx` (UPDATE — add audio drag-drop + "Try example")
+
+**Full replacement file.** Adds:
+1. Audio file drop zone with drag-and-drop support
+2. "Try an example" button that fills sample data
+3. Toggle between text and audio input modes
+
+```tsx
+"use client";
+
+import { useState, useRef, useCallback } from "react";
+import { Button } from "@/components/ui/button";
+import { Textarea } from "@/components/ui/textarea";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Card } from "@/components/ui/card";
+import { fileToBase64 } from "@/lib/api";
+
+interface UploadPanelProps {
+  onSubmit: (data: {
+    content: string;
+    voiceProfile: string;
+    founderName: string;
+    inputType: "text" | "audio";
+  }) => void;
+  isLoading: boolean;
+}
+
+const SAMPLE_DATA = {
+  founderName: "Alex Chen",
+  voiceProfile: "direct, technical, contrarian",
+  content: `I've been building developer tools for 12 years now and here's what nobody talks about — the best tools aren't the ones with the most features. They're the ones that disappear.
+
+Every time I see a startup pitch with "AI-powered" slapped on their developer tool, I cringe. Not because AI is bad — we use it heavily — but because they're solving the wrong problem. Developers don't want more intelligence in their tools. They want less friction.
+
+We spent 6 months building an AI code review feature. Usage was terrible. Then we spent 2 weeks making our git integration 200ms faster. Usage went through the roof. The lesson? Developers will tolerate a dumb tool that's fast over a smart tool that makes them wait.
+
+The real insight from running a 200-person engineering org is this: developer productivity isn't about the tools at all. It's about the feedback loops. Shorten the loop between "I changed something" and "I know if it worked" and everything else takes care of itself.
+
+Most DevTool startups die because they optimize for the demo, not the daily driver. A tool that looks impressive in a 5-minute pitch but adds 30 seconds of friction per use will get uninstalled within a week. I've seen it happen dozens of times.
+
+My contrarian take: the next big developer tool won't use AI at all. It'll be something brutally simple that removes a step everyone forgot they were doing. Like how containers didn't add intelligence — they removed an entire class of "works on my machine" problems.
+
+Stop building smart tools. Build fast ones.`,
+};
+
+const ACCEPTED_AUDIO_TYPES = [
+  "audio/mpeg",      // .mp3
+  "audio/wav",       // .wav
+  "audio/x-m4a",     // .m4a
+  "audio/mp4",       // .m4a alternate
+  "audio/webm",      // .webm
+];
+const MAX_FILE_SIZE_MB = 25;
+
+export function UploadPanel({ onSubmit, isLoading }: UploadPanelProps) {
+  const [content, setContent] = useState("");
+  const [voiceProfile, setVoiceProfile] = useState("direct, technical, contrarian");
+  const [founderName, setFounderName] = useState("");
+  const [inputMode, setInputMode] = useState<"text" | "audio">("text");
+  const [audioFile, setAudioFile] = useState<File | null>(null);
+  const [isDragging, setIsDragging] = useState(false);
+  const [audioError, setAudioError] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const validateAndSetFile = (file: File) => {
+    setAudioError(null);
+
+    if (!ACCEPTED_AUDIO_TYPES.includes(file.type)) {
+      setAudioError("Unsupported format. Use .mp3, .wav, or .m4a");
+      return;
+    }
+
+    if (file.size > MAX_FILE_SIZE_MB * 1024 * 1024) {
+      setAudioError(`File too large. Max ${MAX_FILE_SIZE_MB}MB.`);
+      return;
+    }
+
+    setAudioFile(file);
+  };
+
+  const handleDragOver = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragging(true);
+  }, []);
+
+  const handleDragLeave = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragging(false);
+  }, []);
+
+  const handleDrop = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragging(false);
+    const file = e.dataTransfer.files[0];
+    if (file) validateAndSetFile(file);
+  }, []);
+
+  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) validateAndSetFile(file);
+  };
+
+  const handleTryExample = () => {
+    setInputMode("text");
+    setFounderName(SAMPLE_DATA.founderName);
+    setVoiceProfile(SAMPLE_DATA.voiceProfile);
+    setContent(SAMPLE_DATA.content);
+    setAudioFile(null);
+  };
+
+  const handleSubmit = async () => {
+    if (inputMode === "text" && !content.trim()) return;
+    if (inputMode === "audio" && !audioFile) return;
+
+    let submitContent = content.trim();
+
+    if (inputMode === "audio" && audioFile) {
+      submitContent = await fileToBase64(audioFile);
+    }
+
+    onSubmit({
+      content: submitContent,
+      voiceProfile,
+      founderName: founderName.trim() || "Founder",
+      inputType: inputMode,
+    });
+  };
+
+  return (
+    <Card className="bg-draper-charcoal border-draper-border p-6 space-y-6">
+      {/* Founder Name */}
+      <div className="space-y-2">
+        <Label htmlFor="founder-name" className="text-sm text-draper-muted">
+          Founder Name
+        </Label>
+        <Input
+          id="founder-name"
+          placeholder="e.g., Alex Chen"
+          value={founderName}
+          onChange={(e) => setFounderName(e.target.value)}
+          className="bg-draper-dark border-draper-border text-white placeholder:text-draper-muted/50"
+        />
+      </div>
+
+      {/* Input Mode Toggle */}
+      <div className="space-y-2">
+        <Label className="text-sm text-draper-muted">Input Method</Label>
+        <div className="flex gap-2">
+          <button
+            onClick={() => setInputMode("text")}
+            className={`px-4 py-2 text-sm rounded-lg border transition-colors ${
+              inputMode === "text"
+                ? "bg-draper-gold/20 border-draper-gold text-draper-gold"
+                : "bg-draper-dark border-draper-border text-draper-muted hover:text-white"
+            }`}
+          >
+            Text
+          </button>
+          <button
+            onClick={() => setInputMode("audio")}
+            className={`px-4 py-2 text-sm rounded-lg border transition-colors ${
+              inputMode === "audio"
+                ? "bg-draper-gold/20 border-draper-gold text-draper-gold"
+                : "bg-draper-dark border-draper-border text-draper-muted hover:text-white"
+            }`}
+          >
+            Audio
+          </button>
+        </div>
+      </div>
+
+      {/* Text Input */}
+      {inputMode === "text" && (
+        <div className="space-y-2">
+          <Label htmlFor="content" className="text-sm text-draper-muted">
+            Raw Founder Brain-Dump
+          </Label>
+          <Textarea
+            id="content"
+            placeholder="Paste the founder's raw, unfiltered thoughts here... The messier the better. We'll extract the gold."
+            value={content}
+            onChange={(e) => setContent(e.target.value)}
+            rows={10}
+            className="bg-draper-dark border-draper-border text-white placeholder:text-draper-muted/50 resize-y min-h-[200px]"
+          />
+          <p className="text-xs text-draper-muted">
+            {content.split(/\s+/).filter(Boolean).length} words
+          </p>
+        </div>
+      )}
+
+      {/* Audio Input — Drag & Drop Zone */}
+      {inputMode === "audio" && (
+        <div className="space-y-2">
+          <Label className="text-sm text-draper-muted">Audio Recording</Label>
+          <div
+            onDragOver={handleDragOver}
+            onDragLeave={handleDragLeave}
+            onDrop={handleDrop}
+            onClick={() => fileInputRef.current?.click()}
+            className={`border-2 border-dashed rounded-lg p-8 text-center cursor-pointer transition-colors ${
+              isDragging
+                ? "border-draper-gold bg-draper-gold/5"
+                : audioFile
+                ? "border-green-500/50 bg-green-900/10"
+                : "border-draper-border hover:border-draper-muted"
+            }`}
+          >
+            {audioFile ? (
+              <div className="space-y-2">
+                <p className="text-sm text-green-400">
+                  {audioFile.name}
+                </p>
+                <p className="text-xs text-draper-muted">
+                  {(audioFile.size / (1024 * 1024)).toFixed(1)} MB
+                </p>
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setAudioFile(null);
+                  }}
+                  className="text-xs text-red-400 hover:text-red-300"
+                >
+                  Remove
+                </button>
+              </div>
+            ) : (
+              <div className="space-y-2">
+                <p className="text-2xl">🎙️</p>
+                <p className="text-sm text-draper-muted">
+                  Drag & drop an audio file, or click to browse
+                </p>
+                <p className="text-xs text-draper-muted/60">
+                  .mp3, .wav, .m4a — max {MAX_FILE_SIZE_MB}MB
+                </p>
+              </div>
+            )}
+          </div>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept=".mp3,.wav,.m4a"
+            onChange={handleFileSelect}
+            className="hidden"
+          />
+          {audioError && (
+            <p className="text-xs text-red-400">{audioError}</p>
+          )}
+        </div>
+      )}
+
+      {/* Voice Profile */}
+      <div className="space-y-2">
+        <Label htmlFor="voice-profile" className="text-sm text-draper-muted">
+          Voice Profile
+        </Label>
+        <Input
+          id="voice-profile"
+          placeholder="e.g., direct, technical, contrarian"
+          value={voiceProfile}
+          onChange={(e) => setVoiceProfile(e.target.value)}
+          className="bg-draper-dark border-draper-border text-white placeholder:text-draper-muted/50"
+        />
+        <p className="text-xs text-draper-muted">
+          Describe the founder&apos;s tone in 3-5 words
+        </p>
+      </div>
+
+      {/* Buttons */}
+      <div className="space-y-3">
+        <Button
+          onClick={handleSubmit}
+          disabled={
+            (inputMode === "text" && !content.trim()) ||
+            (inputMode === "audio" && !audioFile) ||
+            isLoading
+          }
+          className="w-full bg-draper-gold text-draper-black font-semibold hover:bg-draper-gold-hover disabled:opacity-40 disabled:cursor-not-allowed h-12 text-base"
+        >
+          {isLoading ? "Generating..." : "Generate Authority Content"}
+        </Button>
+
+        <button
+          onClick={handleTryExample}
+          disabled={isLoading}
+          className="w-full text-sm text-draper-muted hover:text-draper-gold transition-colors disabled:opacity-40"
+        >
+          or try a sample brain-dump →
+        </button>
+      </div>
+    </Card>
+  );
+}
+```
+
+---
+
+###### File: `frontend/app/page.tsx` (UPDATE — handle inputType + fallback cache)
+
+**What changes:**
+1. `handleSubmit` now accepts `inputType` and passes it to `startPipeline`
+2. Add a "Skip to demo results" fallback link that loads cached results
+
+```tsx
+"use client";
+
+import { useState } from "react";
+import { useRouter } from "next/navigation";
+import { UploadPanel } from "@/components/upload-panel";
+import { startPipeline } from "@/lib/api";
+
+// Pre-cached result for fallback when APIs are down/slow
+const CACHED_RESULT_URL = "/api/cached-result";
+
+export default function HomePage() {
+  const router = useRouter();
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const handleSubmit = async (data: {
+    content: string;
+    voiceProfile: string;
+    founderName: string;
+    inputType: "text" | "audio";
+  }) => {
+    setIsLoading(true);
+    setError(null);
+
+    try {
+      const { pipeline_id } = await startPipeline({
+        input_type: data.inputType,
+        content: data.content,
+        voice_profile: data.voiceProfile,
+        founder_name: data.founderName,
+      });
+
+      sessionStorage.setItem("pipeline_id", pipeline_id);
+      sessionStorage.setItem("founder_name", data.founderName);
+      router.push("/pipeline");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Something went wrong");
+      setIsLoading(false);
+    }
+  };
+
+  const handleFallback = async () => {
+    try {
+      const res = await fetch(CACHED_RESULT_URL);
+      if (!res.ok) throw new Error("No cached results available");
+      const cachedResult = await res.json();
+      sessionStorage.setItem("pipeline_results", JSON.stringify(cachedResult));
+      sessionStorage.setItem("founder_name", cachedResult.metadata?.founder_name || "Alex Chen");
+      router.push("/review");
+    } catch {
+      setError("Fallback cache not available. Please try the live pipeline.");
+    }
+  };
+
+  return (
+    <div className="space-y-8">
+      {/* Hero */}
+      <div className="text-center space-y-3">
+        <h1 className="text-3xl font-bold tracking-tight">
+          Authority Engine
+        </h1>
+        <p className="text-draper-muted max-w-xl mx-auto">
+          Paste a founder&apos;s raw thinking. Get publication-ready content for
+          LinkedIn, X, newsletter, and more — in seconds, not hours.
+        </p>
+      </div>
+
+      {/* Upload Panel */}
+      <UploadPanel onSubmit={handleSubmit} isLoading={isLoading} />
+
+      {/* Error Display */}
+      {error && (
+        <div className="bg-red-900/20 border border-red-800 rounded-lg p-4 text-red-400 text-sm">
+          <p>{error}</p>
+          <button
+            onClick={handleFallback}
+            className="mt-2 text-xs text-draper-gold hover:text-draper-gold-hover underline"
+          >
+            Use cached demo results instead →
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+```
+
+---
+
+##### Feature 2: Fallback Cache
+
+###### File: `backend/main.py` (UPDATE — add cached result endpoint)
+
+**Add this endpoint** after the existing `/health` endpoint:
+
+```python
+# ADD after the health endpoint:
+
+import json
+
+@app.get("/api/cached-result")
+async def get_cached_result():
+    """
+    Returns a pre-cached pipeline result for demo fallback.
+    Used when APIs are slow or down during a live demo.
+    """
+    cache_path = BACKEND_DIR / "sample_data" / "cached_result.json"
+    if not cache_path.exists():
+        raise HTTPException(status_code=404, detail="No cached result available")
+    with open(cache_path, "r") as f:
+        return json.load(f)
+```
+
+Note: `json` is already imported at the top of several agent files but NOT in main.py — add `import json` to the imports at the top of main.py. Also add `from config import BACKEND_DIR` — but `config` is already imported via `from config import *`, so `BACKEND_DIR` is already available.
+
+---
+
+###### File: `backend/sample_data/cached_result.json` (NEW)
+
+**Purpose:** Pre-cached pipeline result. This file should be generated by running the pipeline once with the sample data, then copying the JSON response. For now, create a placeholder structure that Gemini should replace with real output after a successful test run.
+
+```json
+{
+  "pipeline_id": "cached-demo-result",
+  "long_form_draft": "The best developer tools aren't the ones with the most features — they're the ones that disappear.\n\nI've spent 12 years building developer tools, and the most important lesson I've learned contradicts almost everything the industry believes. We worship complexity. We celebrate the AI-powered, the feature-rich, the 'intelligent' tool. But developers? They just want to get back to building.\n\nLast year, my team spent six months building an AI code review feature. We were proud of it — it used the latest models, caught subtle bugs, even suggested refactors. Usage was abysmal. Developers would toggle it off within their first week.\n\nThen we spent two weeks making our git integration 200 milliseconds faster. Usage exploded.\n\nThe math is simple but the industry refuses to accept it: a dumb tool that's fast will always beat a smart tool that makes you wait. Every. Single. Time.\n\nHere's what 200-person engineering organizations have taught me about productivity: it's never about the tools. It's about the feedback loops. The distance between 'I changed something' and 'I know if it worked' is the only metric that matters. Shorten that loop and everything else — velocity, quality, morale — takes care of itself.\n\nMost DevTool startups die from the same disease: they optimize for the demo instead of the daily driver. A tool that looks impressive in a five-minute pitch but adds thirty seconds of friction per use will get uninstalled within a week. I've watched it happen dozens of times from inside companies evaluating these tools.\n\nMy prediction for the next breakthrough developer tool? It won't use AI at all. It will be something brutally simple that removes a step everyone forgot they were doing. Just like containers didn't add intelligence — they eliminated an entire class of 'works on my machine' problems overnight.\n\nStop building smart tools. Build fast ones. Your users will thank you by actually using them.",
+  "critique_scorecard": {
+    "ai_detection_risk": 8,
+    "readability": 72,
+    "contrarian_strength": 8,
+    "voice_authenticity": 8,
+    "hook_power": 9,
+    "actionable_density": 7,
+    "overall": 82,
+    "passed": true,
+    "revision_notes": ""
+  },
+  "assets": {
+    "linkedin_post": "I've built developer tools for 12 years. Here's what nobody talks about:\n\nThe best tools aren't the most feature-rich. They're the ones that disappear.\n\nLast year we spent 6 months building an AI code review feature. Usage was terrible.\n\nThen we spent 2 weeks making git integration 200ms faster. Usage exploded.\n\nThe lesson? Developers will always choose a dumb tool that's fast over a smart tool that makes them wait.\n\nAfter running a 200-person engineering org, I've learned that productivity isn't about tools at all. It's about feedback loops.\n\nShorten the distance between \"I changed something\" and \"I know if it worked\" — everything else follows.\n\nMost DevTool startups die because they optimize for the demo, not the daily driver.\n\nMy prediction: the next big developer tool won't use AI. It'll be something brutally simple that removes a step everyone forgot they were doing.\n\nStop building smart tools. Build fast ones.\n\n#devtools #engineering #leadership",
+    "x_thread": [
+      "I've built developer tools for 12 years. Here's the uncomfortable truth nobody in the industry wants to hear: 🧵",
+      "We spent 6 months building an AI code review feature. Latest models, subtle bug detection, smart refactors.\n\nUsage was terrible.\n\nThen we spent 2 WEEKS making git integration 200ms faster.\n\nUsage exploded.",
+      "The math is simple: A dumb tool that's fast beats a smart tool that makes you wait. Every. Single. Time.\n\nDevelopers don't want intelligence. They want speed.",
+      "After running a 200-person engineering org, I learned: productivity isn't about tools.\n\nIt's about feedback loops.\n\nShorten the distance between \"I changed something\" and \"I know if it worked.\" Everything else follows.",
+      "Most DevTool startups die from the same disease: optimizing for the demo instead of the daily driver.\n\nA tool that looks impressive in a 5-min pitch but adds 30 seconds of friction per use? Uninstalled within a week.",
+      "My prediction: the next breakthrough dev tool won't use AI at all.\n\nIt'll be brutally simple. Like how containers didn't add intelligence — they removed an entire class of problems.\n\nStop building smart tools. Build fast ones."
+    ],
+    "newsletter_blurb": "The best developer tools are the ones that disappear. After 12 years building developer tools and running a 200-person engineering org, I've learned that the industry's obsession with AI-powered, feature-rich tooling is solving the wrong problem entirely. Developers don't want more intelligence — they want less friction. We proved this when our 6-month AI code review feature flopped while a 2-week speed improvement to git integration drove massive adoption. The real insight? Developer productivity isn't about tools at all. It's about feedback loops. Shorten the loop between change and validation, and everything else takes care of itself. My contrarian prediction: the next big developer tool won't use AI. It'll be something brutally simple that removes a step everyone forgot they were doing.",
+    "quote_card_text": "Stop building smart tools. Build fast ones. A dumb tool that's fast will always beat a smart tool that makes you wait."
+  },
+  "metadata": {
+    "total_duration_ms": 34500,
+    "estimated_cost_usd": 0.15,
+    "revision_loops": 0,
+    "input_word_count": 287,
+    "output_word_count": 412,
+    "founder_name": "Alex Chen"
+  }
+}
+```
+
+**Important:** After the first successful end-to-end test run with the sample data, replace this file's content with the actual API response for maximum realism. This placeholder is just to unblock development.
+
+---
+
+##### Feature 3: Error Boundary
+
+###### File: `frontend/components/error-boundary.tsx` (NEW)
+
+**Purpose:** A React error boundary component that catches runtime errors in child components and shows a graceful fallback UI instead of a white screen.
+
+```tsx
+"use client";
+
+import { Component, ReactNode } from "react";
+
+interface ErrorBoundaryProps {
+  children: ReactNode;
+  fallback?: ReactNode;
+}
+
+interface ErrorBoundaryState {
+  hasError: boolean;
+  error: Error | null;
+}
+
+export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
+  constructor(props: ErrorBoundaryProps) {
+    super(props);
+    this.state = { hasError: false, error: null };
+  }
+
+  static getDerivedStateFromError(error: Error) {
+    return { hasError: true, error };
+  }
+
+  render() {
+    if (this.state.hasError) {
+      if (this.props.fallback) {
+        return this.props.fallback;
+      }
+
+      return (
+        <div className="bg-red-900/20 border border-red-800 rounded-lg p-6 text-center space-y-3">
+          <p className="text-red-400 font-semibold">Something went wrong</p>
+          <p className="text-xs text-red-400/70">
+            {this.state.error?.message || "An unexpected error occurred"}
+          </p>
+          <button
+            onClick={() => this.setState({ hasError: false, error: null })}
+            className="px-4 py-2 text-xs bg-draper-dark text-draper-muted rounded hover:text-white border border-draper-border"
+          >
+            Try Again
+          </button>
+        </div>
+      );
+    }
+
+    return this.props.children;
+  }
+}
+```
+
+---
+
+###### File: `frontend/app/pipeline/page.tsx` (UPDATE — wrap PipelineFlow in ErrorBoundary + add retry)
+
+**What changes:** Import ErrorBoundary, wrap the `<PipelineFlow>` component in it, and add a "Retry" button when the pipeline fails.
+
+Find this section in the existing file:
+
+```tsx
+{/* Pipeline Flow Visualization */}
+<PipelineFlow status={status} />
+```
+
+Replace with:
+
+```tsx
+{/* Pipeline Flow Visualization */}
+<ErrorBoundary>
+  <PipelineFlow status={status} />
+</ErrorBoundary>
+```
+
+And add the import at the top:
+
+```tsx
+import { ErrorBoundary } from "@/components/error-boundary";
+```
+
+Also, in the error display section at the bottom, add a retry button. Find:
+
+```tsx
+{error && (
+  <div className="bg-red-900/20 border border-red-800 rounded-lg p-4 text-red-400 text-sm">
+    {error}
+  </div>
+)}
+```
+
+Replace with:
+
+```tsx
+{error && (
+  <div className="bg-red-900/20 border border-red-800 rounded-lg p-4 text-center space-y-3">
+    <p className="text-red-400 text-sm">{error}</p>
+    <button
+      onClick={() => {
+        sessionStorage.clear();
+        router.push("/");
+      }}
+      className="px-4 py-2 text-xs bg-draper-dark text-draper-muted rounded hover:text-white border border-draper-border"
+    >
+      ← Back to Start
+    </button>
+  </div>
+)}
+```
+
+---
+
+##### Feature 4: README
+
+###### File: `README.md` (NEW — in project root `/Users/macbookair/draper/README.md`)
+
+```markdown
+# Draper AI Authority Engine
+
+A multi-agent AI pipeline that transforms a founder's raw thinking into publication-ready, multi-platform content — LinkedIn posts, X threads, newsletter blurbs, and branded quote cards.
+
+Built as a demo for [Draper HQ](https://draperhq.com).
+
+## Architecture
+
+```
+Founder Input → Ingestion → Extraction → Synthesis → Critique → Cascade → 4 Platform Assets
+                 (clean)    (Gemini 3    (GPT-5.2)   (Gemini 3   (GPT-4o
+                              Pro)                     Flash)      mini)
+```
+
+**Frontend:** Next.js 16 + Tailwind v4 + shadcn/ui
+**Backend:** Python FastAPI
+**LLM Providers:** OpenAI (GPT-5.2, GPT-4o-mini, Whisper) + Google (Gemini 3 Pro, Gemini 3 Flash)
+
+## Setup
+
+### Prerequisites
+
+- Node.js 18+
+- Python 3.10+
+- OpenAI API key
+- Google AI API key
+
+### 1. Clone
+
+```bash
+git clone https://github.com/Kaide-LABS/draper.git
+cd draper
+```
+
+### 2. Backend
+
+```bash
+cd backend
+python -m venv venv
+source venv/bin/activate  # macOS/Linux
+pip install -r requirements.txt
+
+# Create .env file
+cp .env.example .env
+# Edit .env and add your API keys:
+# OPENAI_API_KEY=sk-...
+# GOOGLE_API_KEY=...
+
+# Run
+uvicorn main:app --reload --port 8000
+```
+
+### 3. Frontend
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+### 4. Open
+
+Navigate to [http://localhost:3000](http://localhost:3000)
+
+## Usage
+
+1. Enter a founder name and paste raw thoughts (or upload audio)
+2. Click "Generate Authority Content" (or "Try a sample brain-dump")
+3. Watch the 5-agent pipeline process in real-time
+4. Review, edit, and approve the generated content on the dashboard
+
+## Demo Fallback
+
+If APIs are slow or unavailable, click "Use cached demo results" on the error screen to load pre-generated content.
+```
+
+---
+
+##### Feature 5: Backend `sample_data` directory + `.env.example`
+
+###### File: `backend/sample_data/` (NEW directory)
+
+Create this directory. It will contain `cached_result.json` (specified above).
+
+###### File: `backend/.env.example` (NEW if not exists — verify before creating)
+
+```
+OPENAI_API_KEY=sk-your-key-here
+GOOGLE_API_KEY=your-google-api-key-here
+```
+
+---
+
+#### Phase 5: Summary of Changes
+
+| File | Action | Description |
+|------|--------|-------------|
+| `backend/config.py` | UPDATE | Add `WHISPER_MODEL = "whisper-1"` |
+| `backend/agents/ingestion.py` | UPDATE | Add `transcribe_audio()`, refactor to support text/audio |
+| `backend/main.py` | UPDATE | Pass `input_type` to ingestion + add `/api/cached-result` endpoint + add `import json` |
+| `backend/sample_data/cached_result.json` | NEW | Pre-cached demo result for fallback |
+| `backend/.env.example` | NEW (if missing) | API key template |
+| `frontend/lib/api.ts` | UPDATE | Add `fileToBase64()` helper function |
+| `frontend/components/upload-panel.tsx` | UPDATE | Audio drag-drop, input mode toggle, "Try an example" button, sample data |
+| `frontend/app/page.tsx` | UPDATE | Accept `inputType`, add fallback cache logic |
+| `frontend/components/error-boundary.tsx` | NEW | React error boundary component |
+| `frontend/app/pipeline/page.tsx` | UPDATE | Wrap in ErrorBoundary, add retry button |
+| `README.md` | NEW | Setup instructions |
+
+#### Phase 5: Verification Checklist
+
+- [ ] Text input still works end-to-end (regression check)
+- [ ] "Try a sample brain-dump" fills all fields with sample data, runs pipeline successfully
+- [ ] Audio input mode toggle shows drag-drop zone
+- [ ] Drag-and-drop .mp3 file shows filename and size
+- [ ] Audio file upload sends base64 to backend, Whisper transcribes, pipeline completes
+- [ ] Invalid audio file (wrong format / too large) shows error message
+- [ ] If pipeline fails, error message shows with "Back to Start" button
+- [ ] If API is down, error on home page shows "Use cached demo results" link
+- [ ] Cached results load directly to review page, all previews render correctly
+- [ ] `/api/cached-result` endpoint returns valid JSON
+- [ ] ErrorBoundary catches rendering crashes, shows fallback UI with "Try Again"
+- [ ] README instructions work for a fresh clone (backend + frontend start successfully)
+- [ ] Full end-to-end run 3x without errors (text input)
+- [ ] Demo can run entirely from cached data if needed (offline fallback path)
 
 ---
 
