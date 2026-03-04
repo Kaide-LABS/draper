@@ -45,6 +45,31 @@ export interface PipelineResult {
   };
 }
 
+export interface AgentStatus {
+  status: "waiting" | "processing" | "complete" | "failed" | "revising";
+  duration_ms: number | null;
+  output_preview: string | null;
+  // Only present on critique agent:
+  scores?: {
+    ai_detection_risk: number;
+    readability: number;
+    contrarian_strength: number;
+    voice_authenticity: number;
+    hook_power: number;
+    actionable_density: number;
+    overall: number;
+  };
+  passed?: boolean;
+  revision_count?: number;
+}
+
+export interface PipelineStatus {
+  pipeline_id: string;
+  status: "processing" | "complete" | "failed";
+  agents: Record<string, AgentStatus>;
+  error: string | null;
+}
+
 export async function startPipeline(
   request: PipelineRequest
 ): Promise<PipelineStartResponse> {
@@ -57,6 +82,19 @@ export async function startPipeline(
   if (!res.ok) {
     const error = await res.json().catch(() => ({ detail: "Unknown error" }));
     throw new Error(error.detail || `Pipeline failed: ${res.status}`);
+  }
+
+  return res.json();
+}
+
+export async function getPipelineStatus(
+  pipelineId: string
+): Promise<PipelineStatus> {
+  const res = await fetch(`${API_BASE}/api/pipeline/${pipelineId}/status`);
+
+  if (!res.ok) {
+    const error = await res.json().catch(() => ({ detail: "Unknown error" }));
+    throw new Error(error.detail || `Failed to get status: ${res.status}`);
   }
 
   return res.json();

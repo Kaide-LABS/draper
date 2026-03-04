@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { UploadPanel } from "@/components/upload-panel";
-import { startPipeline, getPipelineResults } from "@/lib/api";
+import { startPipeline } from "@/lib/api";
 
 export default function HomePage() {
   const router = useRouter();
@@ -19,7 +19,6 @@ export default function HomePage() {
     setError(null);
 
     try {
-      // Start the pipeline
       const { pipeline_id } = await startPipeline({
         input_type: "text",
         content: data.content,
@@ -27,19 +26,13 @@ export default function HomePage() {
         founder_name: data.founderName,
       });
 
-      // For Phase 2: pipeline runs synchronously, so results are ready immediately
-      // Phase 3 will switch to async with polling
-      const results = await getPipelineResults(pipeline_id);
-
-      // Store results in sessionStorage for the pipeline/review pages to read
-      sessionStorage.setItem("pipeline_results", JSON.stringify(results));
+      // Store pipeline_id — the pipeline page will poll for status
       sessionStorage.setItem("pipeline_id", pipeline_id);
 
-      // Navigate to pipeline page
+      // Navigate to pipeline page immediately (don't wait for completion)
       router.push("/pipeline");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Something went wrong");
-    } finally {
       setIsLoading(false);
     }
   };
